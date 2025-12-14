@@ -25,7 +25,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
     const [loading, setLoading] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
 
-    // Photo gallery state
     const [photos, setPhotos] = useState([]);
     const [loadingPhotos, setLoadingPhotos] = useState(false);
     const [selectedPhoto, setSelectedPhoto] = useState(null);
@@ -33,7 +32,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
     const [photoFilter, setPhotoFilter] = useState('all'); // all, liked, recent
     const [photoModeFilter, setPhotoModeFilter] = useState('all');
 
-    // Expandable sections
     const [expandedSections, setExpandedSections] = useState({
         modeUsage: true,
         foodTypes: false,
@@ -41,7 +39,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
         learningHistory: false,
     });
 
-    // Local state for preferences
     const [preferences, setPreferences] = useState({
         favoriteMode: 'normal',
         enableSuggestions: true,
@@ -49,14 +46,12 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
         rememberLastMode: true,
     });
 
-    // Sync with user profile
     useEffect(() => {
         if (userProfile?.preferences) {
             setPreferences(userProfile.preferences);
         }
     }, [userProfile]);
 
-    // Load photos when photos tab is selected
     useEffect(() => {
         if (activeTab === 'photos' && currentUser) {
             loadPhotos();
@@ -76,7 +71,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
         }
     };
 
-    // Filtered photos
     const filteredPhotos = useMemo(() => {
         let result = photos;
         
@@ -98,7 +92,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
         return result;
     }, [photos, photoFilter, photoModeFilter]);
 
-    // Calculate mode usage statistics
     const modeStats = useMemo(() => {
         const stats = {};
         photos.forEach(p => {
@@ -280,7 +273,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
         return modeOptions.find(m => m.id === modeId) || modeOptions[0];
     };
 
-    // Get food type preferences from profile
     const foodTypePreferences = useMemo(() => {
         const prefs = userProfile?.foodTypePreferences || {};
         return Object.entries(prefs)
@@ -293,7 +285,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
             .sort((a, b) => b.count - a.count);
     }, [userProfile]);
 
-    // Get lighting preferences from profile
     const lightingPreferences = useMemo(() => {
         const prefs = userProfile?.lightingPreferences || {};
         return Object.entries(prefs)
@@ -316,7 +307,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
         ? "relative w-full h-full flex flex-col overflow-hidden"
         : "relative w-full max-w-lg bg-gradient-to-b from-gray-900 to-gray-950 rounded-3xl overflow-hidden shadow-2xl border border-white/10 animate-scaleIn max-h-[90vh] flex flex-col";
 
-    // Collapsible Section Component
     const CollapsibleSection = ({ title, icon: Icon, iconColor, isExpanded, onToggle, children, badge }) => (
         <div className="bg-white/5 rounded-xl overflow-hidden">
             <button
@@ -346,7 +336,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
         </div>
     );
 
-    // Progress Bar Component
     const ProgressBar = ({ value, max, color = 'green', showLabel = true }) => {
         const percentage = max > 0 ? Math.round((value / max) * 100) : 0;
         return (
@@ -364,7 +353,6 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
         );
     };
 
-    // Adjustment Value Display
     const AdjustmentValue = ({ label, value, color = 'blue' }) => (
         <div className="flex items-center justify-between py-1">
             <span className="text-gray-400 text-xs">{label}</span>
@@ -377,7 +365,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
     return (
         <div className={wrapperClass}>
             <div className={contentClass}>
-                {/* Header */}
+                
                 <div className="relative p-4 border-b border-white/10 shrink-0">
                     {!isEmbedded && (
                         <button
@@ -411,7 +399,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                     )}
                 </div>
 
-                {/* Tabs */}
+                
                 <div className="flex border-b border-white/10 shrink-0 overflow-x-auto">
                     {[
                         { id: 'profile', icon: BarChart3, label: currentLanguage === 'zh-TW' ? '統計' : 'Stats' },
@@ -434,12 +422,12 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                     ))}
                 </div>
 
-                {/* Content */}
+                
                 <div className="flex-1 overflow-y-auto p-4">
-                    {/* Statistics Tab */}
+                    
                     {activeTab === 'profile' && (
                         <div className="space-y-4">
-                            {/* Quick Stats Cards */}
+                            
                             <div className="grid grid-cols-3 gap-3">
                                 <div className="bg-white/5 rounded-xl p-4 text-center">
                                     <Camera className="w-6 h-6 text-green-400 mx-auto mb-2" />
@@ -458,7 +446,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Favorite Mode Card */}
+                            
                             <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-xl p-4 border border-purple-500/20">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Star className="w-5 h-5 text-purple-400" />
@@ -484,7 +472,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Mode Usage Distribution */}
+                            
                             <CollapsibleSection
                                 title={currentLanguage === 'zh-TW' ? '模式使用分布' : 'Mode Usage'}
                                 icon={PieChart}
@@ -520,7 +508,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </CollapsibleSection>
 
-                            {/* Food Type Preferences */}
+                            
                             <CollapsibleSection
                                 title={currentLanguage === 'zh-TW' ? '食物類型偏好' : 'Food Type Preferences'}
                                 icon={Flame}
@@ -573,7 +561,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </CollapsibleSection>
 
-                            {/* Language Toggle */}
+                            
                             <div className="bg-white/5 rounded-xl p-4">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
@@ -591,12 +579,12 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                         </div>
                     )}
 
-                    {/* Photos Tab */}
+                    
                     {activeTab === 'photos' && (
                         <div className="space-y-4">
-                            {/* Filter Bar */}
+                            
                             <div className="flex flex-wrap gap-2">
-                                {/* Photo Type Filter */}
+                                
                                 <div className="flex bg-white/5 rounded-lg p-1">
                                     {[
                                         { id: 'all', label: currentLanguage === 'zh-TW' ? '全部' : 'All' },
@@ -618,7 +606,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                     ))}
                                 </div>
 
-                                {/* Mode Filter */}
+                                
                                 <select
                                     value={photoModeFilter}
                                     onChange={(e) => setPhotoModeFilter(e.target.value)}
@@ -633,7 +621,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </select>
                             </div>
 
-                            {/* Photo Count */}
+                            
                             <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-400">
                                     {currentLanguage === 'zh-TW' 
@@ -670,7 +658,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                                 className="w-full aspect-square object-cover rounded-xl cursor-pointer hover:opacity-90 transition-opacity"
                                                 onClick={() => setSelectedPhoto(photo)}
                                             />
-                                            {/* Overlay */}
+                                            
                                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent rounded-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                                                 <div className="absolute bottom-2 left-2 right-2">
                                                     <div className="text-white text-xs">{formatShortDate(photo.createdAt)}</div>
@@ -682,7 +670,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            {/* Delete button */}
+                                            
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -704,10 +692,10 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                         </div>
                     )}
 
-                    {/* AI Learning Tab */}
+                    
                     {activeTab === 'learning' && (
                         <div className="space-y-4">
-                            {/* AI Patterns Overview */}
+                            
                             <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-xl p-4 border border-purple-500/20">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Sparkles className="w-5 h-5 text-purple-400" />
@@ -763,7 +751,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Learned Adjustments */}
+                            
                             <div className="bg-white/5 rounded-xl p-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <TrendingUp className="w-5 h-5 text-green-400" />
@@ -807,7 +795,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Lighting Preferences */}
+                            
                             <CollapsibleSection
                                 title={currentLanguage === 'zh-TW' ? '光線條件偏好' : 'Lighting Preferences'}
                                 icon={Sun}
@@ -850,7 +838,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </CollapsibleSection>
 
-                            {/* Clear Learning Data */}
+                            
                             <button
                                 onClick={handleClearLearning}
                                 disabled={loading}
@@ -866,7 +854,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                         </div>
                     )}
 
-                    {/* History Tab */}
+                    
                     {activeTab === 'history' && (
                         <div className="space-y-4">
                             <div className="flex items-center gap-2 mb-2">
@@ -946,10 +934,10 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                         </div>
                     )}
 
-                    {/* Preferences Tab */}
+                    
                     {activeTab === 'preferences' && (
                         <div className="space-y-4">
-                            {/* Enable suggestions */}
+                            
                             <div className="bg-white/5 rounded-xl p-4">
                                 <div className="flex items-center justify-between">
                                     <div>
@@ -967,7 +955,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Auto apply preference */}
+                            
                             <div className="bg-white/5 rounded-xl p-4">
                                 <div className="flex items-center justify-between">
                                     <div>
@@ -985,7 +973,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Remember last mode */}
+                            
                             <div className="bg-white/5 rounded-xl p-4">
                                 <div className="flex items-center justify-between">
                                     <div>
@@ -1003,7 +991,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Favorite mode selector */}
+                            
                             <div className="bg-white/5 rounded-xl p-4">
                                 <div className="text-white font-medium mb-3">{t('profile.selectFavoriteMode')}</div>
                                 <div className="grid grid-cols-3 gap-2">
@@ -1028,7 +1016,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                     )}
                 </div>
 
-                {/* Footer */}
+                
                 <div className="p-4 border-t border-white/10 shrink-0">
                     <button
                         onClick={handleLogout}
@@ -1040,14 +1028,14 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                 </div>
             </div>
 
-            {/* Photo Detail Modal */}
+            
             {selectedPhoto && (
                 <div
                     className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center p-4"
                     onClick={() => setSelectedPhoto(null)}
                 >
                     <div className="relative max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                        {/* Close button */}
+                        
                         <button
                             onClick={() => setSelectedPhoto(null)}
                             className="absolute top-2 right-2 w-10 h-10 bg-black/50 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors z-10"
@@ -1055,16 +1043,16 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                             <X className="w-6 h-6 text-white" />
                         </button>
 
-                        {/* Photo */}
+                        
                         <img
                             src={selectedPhoto.imageURL}
                             alt="Photo detail"
                             className="w-full h-auto max-h-[60vh] object-contain rounded-xl"
                         />
 
-                        {/* Photo info */}
+                        
                         <div className="mt-4 bg-white/5 rounded-xl p-4 space-y-4">
-                            {/* Header */}
+                            
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <span className="text-2xl">{getModeInfo(selectedPhoto.mode).icon}</span>
@@ -1097,7 +1085,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Detailed Parameters */}
+                            
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="bg-black/30 rounded-lg p-3">
                                     <div className="text-gray-400 text-xs mb-2">
@@ -1164,7 +1152,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             </div>
 
-                            {/* Filters Applied */}
+                            
                             {selectedPhoto.filters && (
                                 <div className="bg-black/30 rounded-lg p-3">
                                     <div className="text-gray-400 text-xs mb-2">
@@ -1190,7 +1178,7 @@ const UserProfileModal = ({ isOpen, onClose, isEmbedded = false }) => {
                                 </div>
                             )}
 
-                            {/* Delete Button */}
+                            
                             <button
                                 onClick={() => handleDeletePhoto(selectedPhoto)}
                                 disabled={deletingPhotoId === selectedPhoto.id}

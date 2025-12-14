@@ -10,7 +10,6 @@ import restaurantService from '../services/restaurantService';
 import photoAnalysisService from '../services/photoAnalysisService';
 import RestaurantPicker from './RestaurantPicker';
 
-// Food classes
 const FOOD_CLASSES = [
   'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog',
   'pizza', 'donut', 'cake', 'bowl', 'cup', 'fork', 'knife', 'spoon',
@@ -29,7 +28,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
   const detectIntervalRef = useRef(null);
   const trackRef = useRef(null);
 
-  // Use ref to store real-time data
   const stateRef = useRef({
     marker: null,
     frameSize: { width: 20, height: 20 },
@@ -45,22 +43,18 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
   const [facingMode, setFacingMode] = useState('environment');
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
 
-  // Model status
   const [modelLoading, setModelLoading] = useState(true);
   const [modelReady, setModelReady] = useState(false);
 
-  // Status for UI display
   const [markerPosition, setMarkerPosition] = useState(null);
   const [detectedObject, setDetectedObject] = useState(null);
   const [cameraSettings, setCameraSettings] = useState(null);
   const [photoInfo, setPhotoInfo] = useState(null);
 
-  // Zoom related status
   const [zoom, setZoom] = useState(1);
   const [zoomRange, setZoomRange] = useState({ min: 1, max: 1 });
   const [supportsZoom, setSupportsZoom] = useState(false);
 
-  // Photo mode and AI learning
   const [selectedMode, setSelectedMode] = useState('normal');
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [multiCaptureMode, setMultiCaptureMode] = useState(false);
@@ -72,7 +66,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
   const [captureProgress, setCaptureProgress] = useState({ current: 0, total: 0 }); // Progress indicator
   const [showAIPanel, setShowAIPanel] = useState(false); // Toggle AI parameters panel
 
-  // Image preview and color adjustment
   const [imagePreviewZoom, setImagePreviewZoom] = useState(false);
   const [previewScale, setPreviewScale] = useState(1);
   const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
@@ -85,13 +78,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     saturation: 0,
     warmth: 0
   })
-  // Store the adjustments at capture time (persisted for display after capture)
   const [capturedAdjustments, setCapturedAdjustments] = useState(null);
-  // Store raw image and filter string for CSS-based display (matches preview exactly)
   const [rawCapturedImage, setRawCapturedImage] = useState(null);
   const [capturedFilterStr, setCapturedFilterStr] = useState(null);
 
-  // Video stabilization
   const [stabilizationEnabled, setStabilizationEnabled] = useState(true);
   const stabilizationRef = useRef({
     offsetX: 0,
@@ -102,55 +92,44 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     prevOffsetY: 0
   });
 
-  // Preference learning
   const [isPhotoLiked, setIsPhotoLiked] = useState(false);
   const [preferenceApplied, setPreferenceApplied] = useState(false);
   const [suggestedPreference, setSuggestedPreference] = useState(null); // Store suggested preference
 
-  // User Profile suggestions
   const [showProfileSuggestion, setShowProfileSuggestion] = useState(false);
   const [profileSuggestion, setProfileSuggestion] = useState(null);
   const [suggestionDismissed, setSuggestionDismissed] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
 
-  // Grid overlay (九宮格)
   const [showGrid, setShowGrid] = useState(false);
   const showGridRef = useRef(false);
 
-  // Photo saving state
   const [isSavingPhoto, setIsSavingPhoto] = useState(false);
   const [photoSaved, setPhotoSaved] = useState(false);
 
-  // Restaurant selection state
   const [selectedRestaurant, setSelectedRestaurant] = useState(null);
   const [showRestaurantPicker, setShowRestaurantPicker] = useState(false);
   const [shareToPublic, setShareToPublic] = useState(true);
   const [isSharing, setIsSharing] = useState(false);
   const [shared, setShared] = useState(false);
 
-  // New UI State
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
   const [showModePopup, setShowModePopup] = useState(false);
   const [showAdjustmentsPopup, setShowAdjustmentsPopup] = useState(false);
   const [activeAdjustment, setActiveAdjustment] = useState('brightness');
 
-  // AI Photo Analysis State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [showAnalysisPanel, setShowAnalysisPanel] = useState(false);
 
-  // Keep showGridRef in sync with showGrid state
   useEffect(() => {
     showGridRef.current = showGrid;
   }, [showGrid]);
 
-  // 自動觸發 AI 分析 - 每次拍新照片時
   useEffect(() => {
-    // 只有當有新照片、尚未分析、且不在分析中時才觸發
     if (capturedImage && !analysisResult && !isAnalyzing) {
       const imageToAnalyze = capturedImage;
       
-      // 直接在 useEffect 中進行分析，避免閉包問題
       const runAnalysis = async () => {
         setIsAnalyzing(true);
         
@@ -180,27 +159,22 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         }
       };
       
-      // 延遲一點開始分析，讓 UI 先更新
       const timer = setTimeout(runAnalysis, 300);
       return () => clearTimeout(timer);
     }
   }, [capturedImage, analysisResult, isAnalyzing, manualAdjustments, selectedMode, currentLanguage]);
 
-  // Apply params from map view
   useEffect(() => {
     if (appliedParams && isOpen && cameraReady) {
       console.log('📍 Applying params from restaurant:', appliedParams);
 
-      // Apply mode
       if (appliedParams.mode) {
         setSelectedMode(appliedParams.mode);
       }
 
-      // Get base filters from mode
       const modeParams = preferenceService.getModeParams(appliedParams.mode || selectedMode);
       const baseFilters = { ...modeParams.filters };
 
-      // Apply manual adjustments
       let manualAdj = { brightness: 0, contrast: 0, saturation: 0, warmth: 0 };
       if (appliedParams.manualAdjustments) {
         manualAdj = {
@@ -214,7 +188,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         console.log('📍 Applied manual adjustments:', manualAdj);
       }
 
-      // Calculate final filters: base mode + manual adjustments (with 1.5x multiplier for visible effect)
       const finalFilters = {
         brightness: baseFilters.brightness + (manualAdj.brightness * 1.5),
         contrast: baseFilters.contrast + (manualAdj.contrast * 1.5),
@@ -222,7 +195,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         warmth: baseFilters.warmth + (manualAdj.warmth * 1.5)
       };
 
-      // Clamp to valid ranges
       finalFilters.brightness = Math.max(50, Math.min(200, finalFilters.brightness));
       finalFilters.contrast = Math.max(50, Math.min(200, finalFilters.contrast));
       finalFilters.saturate = Math.max(50, Math.min(300, finalFilters.saturate));
@@ -231,18 +203,15 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       stateRef.current.filters = finalFilters;
       console.log('📍 Applied final filters:', finalFilters);
 
-      // Force a re-render of the camera preview
       setPreferenceApplied(true);
       setTimeout(() => setPreferenceApplied(false), 1000);
 
-      // Notify parent that params have been applied
       if (onParamsApplied) {
         onParamsApplied();
       }
     }
   }, [appliedParams, isOpen, cameraReady, onParamsApplied]);
 
-  // Load model
   const loadModel = useCallback(async () => {
     try {
       setModelLoading(true);
@@ -258,7 +227,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   }, [t]);
 
-  // Initialize camera
   const initCamera = useCallback(async () => {
     try {
       setError(null);
@@ -280,7 +248,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
       streamRef.current = stream;
 
-      // Check if zoom is supported
       const videoTrack = stream.getVideoTracks()[0];
       trackRef.current = videoTrack;
 
@@ -317,10 +284,8 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           setCameraSettings(null);
           setCameraReady(true);
 
-          // Apply initial mode filters
           let initialMode = selectedMode;
 
-          // If user is logged in and has preferred mode, use it
           if (currentUser && userProfile?.preferences?.rememberLastMode && userProfile?.preferences?.favoriteMode) {
             initialMode = userProfile.preferences.favoriteMode;
             setSelectedMode(initialMode);
@@ -329,7 +294,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           const modeParams = preferenceService.getModeParams(initialMode);
           stateRef.current.filters = { ...modeParams.filters };
 
-          // If user is logged in and has learned adjustments, apply them
           if (currentUser && userProfile?.learnedAdjustments && userProfile?.preferences?.autoApplyPreference) {
             const learned = userProfile.learnedAdjustments;
             const adjustments = {
@@ -341,7 +305,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             setManualAdjustments(adjustments);
             stateRef.current.manualAdjustments = adjustments;
 
-            // Apply to filters
             stateRef.current.filters.brightness = 100 + adjustments.brightness;
             stateRef.current.filters.contrast = 100 + adjustments.contrast;
             stateRef.current.filters.saturate = 100 + adjustments.saturation;
@@ -361,7 +324,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   }, [facingMode, t]); // Removed selectedMode to prevent camera re-initialization on mode change
 
-  // Adjust zoom
   const handleZoomChange = async (newZoom) => {
     if (!trackRef.current || !supportsZoom) return;
 
@@ -378,7 +340,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   };
 
-  // Quick zoom buttons
   const zoomPresets = [
     { label: '0.5x', value: 0.5, available: zoomRange.min <= 0.5 },
     { label: '1x', value: 1, available: true },
@@ -387,9 +348,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     { label: '5x', value: 5, available: zoomRange.max >= 5 }
   ].filter(p => p.available && p.value >= zoomRange.min && p.value <= zoomRange.max);
 
-  // Analyze region
   const analyzeRegion = useCallback((video, marker, frameSize, objectType) => {
-    // Prevent analysis if camera is not ready or video is invalid
     if (!canvasRef.current || !video || video.readyState < 2) return;
     if (!cameraReady || multiCaptureMode) return; // Don't analyze during capture
 
@@ -423,13 +382,11 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       minB = Math.min(minB, br);
       maxB = Math.max(maxB, br);
 
-      // Calculate saturation
       const max = Math.max(rb, gb, bb);
       const min = Math.min(rb, gb, bb);
       const saturation = max === 0 ? 0 : (max - min) / max;
       totalSaturation += saturation;
 
-      // Analyze hue distribution
       const avg = (rb + gb + bb) / 3;
       if (rb > avg + 20 || gb > avg + 20) {
         if (rb > gb) hueDistribution.warm++;
@@ -438,7 +395,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         hueDistribution.neutral++;
       }
 
-      // Calculate dominant hue (simplified)
       if (rb > gb && rb > bb) dominantHue += 0; // Red
       else if (gb > rb && gb > bb) dominantHue += 120; // Green
       else if (bb > rb && bb > gb) dominantHue += 240; // Blue
@@ -451,7 +407,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     const avgSaturation = (totalSaturation / pixels) * 100;
     dominantHue /= pixels;
 
-    // Determine color tone characteristics
     const isWarmTone = hueDistribution.warm > hueDistribution.cool;
     const isCoolTone = hueDistribution.cool > hueDistribution.warm;
     const colorVibrancy = avgSaturation > 50 ? 'high' : avgSaturation > 30 ? 'medium' : 'low';
@@ -474,7 +429,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       isBacklit: envBr > brightness + 30,
       isLowLight: envBr < 80,
       objectType,
-      // Enhanced color analysis
       saturation: Math.round(avgSaturation),
       isWarmTone,
       isCoolTone,
@@ -483,14 +437,12 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       hueDistribution
     });
 
-    // Store context for learning (enhanced with color analysis)
     const context = {
       brightness: Math.round(brightness),
       colorTemp: Math.round((r - b) / 255 * 100),
       isBacklit: envBr > brightness + 30,
       isLowLight: envBr < 80,
       objectType,
-      // Enhanced color analysis
       saturation: Math.round(avgSaturation),
       isWarmTone,
       isCoolTone,
@@ -498,7 +450,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     };
     setCurrentContext(context);
 
-    // Apply user preference if available (use enhanced context)
     const preferenceResult = preferenceService.applyPreference({
       ...context,
       saturation: Math.round(avgSaturation),
@@ -507,10 +458,8 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       colorVibrancy
     }, baseSettings);
 
-    // MODIFIED: Instead of auto-applying, we check if it's a user preference and suggest it
     if (preferenceResult.source === 'user') {
       setSuggestedPreference(preferenceResult);
-      // Don't apply it yet, use AI settings for now
       setCameraSettings(baseSettings);
       setPreferenceApplied(false);
     } else {
@@ -519,39 +468,29 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       setPreferenceApplied(false);
     }
 
-    // Apply mode preset or user preference filters with AI color analysis
     let filters;
 
-    // If we have a suggested preference but haven't applied it, use standard AI logic
-    // If preferenceResult.source is 'ai', we use it directly
     if (preferenceResult.source === 'user') {
-      // Fallback to standard AI logic (same as 'else' block below)
       const modeParams = preferenceService.getModeParams(selectedMode);
 
-      // AI-based color tone adjustment
       let aiSaturationAdjust = 0;
       let aiWarmthAdjust = 0;
 
-      // Adjust based on color vibrancy
       if (colorVibrancy === 'low') {
         aiSaturationAdjust = 15; // Boost low saturation
       } else if (colorVibrancy === 'high') {
         aiSaturationAdjust = -5; // Slightly reduce oversaturation
       }
 
-      // Adjust warmth based on tone analysis
       if (isWarmTone && baseSettings.warmth < 20) {
         aiWarmthAdjust = 10; // Enhance warm tones
       } else if (isCoolTone && baseSettings.warmth > -10) {
         aiWarmthAdjust = -15; // Cool down cool tones
       }
 
-      // Adjust based on dominant hue
       if (dominantHue < 60 || dominantHue > 300) {
-        // Red/Orange dominant - enhance warmth
         aiWarmthAdjust += 8;
       } else if (dominantHue > 150 && dominantHue < 270) {
-        // Blue/Cyan dominant - cool down
         aiWarmthAdjust -= 10;
       }
 
@@ -562,7 +501,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         warmth: baseSettings.warmth + modeParams.filters.warmth + aiWarmthAdjust + stateRef.current.manualAdjustments.warmth
       };
     } else if (preferenceResult.filters) {
-      // Apply manual adjustments on top of preference filters
       const adj = stateRef.current.manualAdjustments;
       filters = {
         brightness: preferenceResult.filters.brightness + (adj.brightness * 1.5),
@@ -573,30 +511,24 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     } else {
       const modeParams = preferenceService.getModeParams(selectedMode);
 
-      // AI-based color tone adjustment
       let aiSaturationAdjust = 0;
       let aiWarmthAdjust = 0;
 
-      // Adjust based on color vibrancy
       if (colorVibrancy === 'low') {
         aiSaturationAdjust = 15; // Boost low saturation
       } else if (colorVibrancy === 'high') {
         aiSaturationAdjust = -5; // Slightly reduce oversaturation
       }
 
-      // Adjust warmth based on tone analysis
       if (isWarmTone && baseSettings.warmth < 20) {
         aiWarmthAdjust = 10; // Enhance warm tones
       } else if (isCoolTone && baseSettings.warmth > -10) {
         aiWarmthAdjust = -15; // Cool down cool tones
       }
 
-      // Adjust based on dominant hue
       if (dominantHue < 60 || dominantHue > 300) {
-        // Red/Orange dominant - enhance warmth
         aiWarmthAdjust += 8;
       } else if (dominantHue > 150 && dominantHue < 270) {
-        // Blue/Cyan dominant - cool down
         aiWarmthAdjust -= 10;
       }
 
@@ -611,14 +543,12 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     stateRef.current.filters = filters;
   }, [selectedMode, cameraReady, multiCaptureMode, t]);
 
-  // Apply mode filters directly to preview (even without marker)
   const applyModeFilters = useCallback(() => {
     if (!cameraReady || multiCaptureMode) return;
 
     const modeParams = preferenceService.getModeParams(selectedMode);
     const baseFilters = modeParams.filters;
 
-    // Apply mode filters with manual adjustments from stateRef
     const filters = {
       brightness: baseFilters.brightness + stateRef.current.manualAdjustments.brightness,
       contrast: baseFilters.contrast + stateRef.current.manualAdjustments.contrast,
@@ -626,7 +556,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       warmth: baseFilters.warmth + stateRef.current.manualAdjustments.warmth
     };
 
-    // Clamp values to reasonable ranges
     filters.brightness = Math.max(50, Math.min(150, filters.brightness));
     filters.contrast = Math.max(50, Math.min(150, filters.contrast));
     filters.saturate = Math.max(50, Math.min(200, filters.saturate));
@@ -635,12 +564,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     stateRef.current.filters = filters;
   }, [selectedMode, cameraReady, multiCaptureMode]);
 
-  // Immediately update filters when manual adjustments change (for instant preview)
   const updateFiltersImmediately = useCallback((adjustmentType, value) => {
     console.log('🔥 updateFiltersImmediately called:', adjustmentType, value);
 
-    // Always update stateRef directly - no conditions needed
-    // The preview loop will use these values on next frame
     stateRef.current.manualAdjustments = {
       ...stateRef.current.manualAdjustments,
       [adjustmentType]: value
@@ -652,7 +578,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     const baseFilters = modeParams.filters;
     const adj = stateRef.current.manualAdjustments;
 
-    // Calculate new filters with manual adjustment effect
     const filters = {
       brightness: baseFilters.brightness + (adj.brightness * 1.5),
       contrast: baseFilters.contrast + (adj.contrast * 1.5),
@@ -660,19 +585,16 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       warmth: baseFilters.warmth + (adj.warmth * 1.5)
     };
 
-    // Clamp values to reasonable ranges
     filters.brightness = Math.max(50, Math.min(200, filters.brightness));
     filters.contrast = Math.max(50, Math.min(200, filters.contrast));
     filters.saturate = Math.max(50, Math.min(300, filters.saturate));
     filters.warmth = Math.max(-75, Math.min(75, filters.warmth));
 
-    // IMMEDIATELY update stateRef so preview loop uses new values
     stateRef.current.filters = filters;
 
     console.log('✅ Filters updated:', stateRef.current.filters);
   }, [selectedMode]);
 
-  // Trigger immediate analysis when mode changes
   const triggerImmediateAnalysis = useCallback(() => {
     if (!cameraReady || !videoRef.current || multiCaptureMode) return;
 
@@ -681,21 +603,17 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
     const state = stateRef.current;
 
-    // If no marker, just apply mode filters directly
     if (!state.marker || !markerPosition) {
       applyModeFilters();
       return;
     }
 
-    // Use current detected object type or 'unknown'
     const objectType = state.detectedObject ?
       state.detectedObject.split(' ')[0] : 'unknown';
 
-    // Immediately trigger analysis with current mode
     analyzeRegion(video, state.marker, state.frameSize, objectType);
   }, [cameraReady, markerPosition, multiCaptureMode, analyzeRegion, applyModeFilters]);
 
-  // Object detection loop
   const startDetectionLoop = useCallback(() => {
     if (detectIntervalRef.current) {
       clearInterval(detectIntervalRef.current);
@@ -789,7 +707,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }, 500); // Increased from 250ms to 500ms for better performance
   }, [analyzeRegion]);
 
-  // Generate camera settings with enhanced color analysis
   const generateSettings = (analysis) => {
     const {
       brightness, dynamicRange, colorTemp, isBacklit, isLowLight, objectType,
@@ -867,7 +784,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     return settings;
   };
 
-  // Preview loop
   const startPreviewLoop = useCallback(() => {
     const video = videoRef.current;
     const canvas = previewCanvasRef.current;
@@ -884,13 +800,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         canvas.width = vw;
         canvas.height = vh;
 
-        // Ensure filters are valid numbers - READ DIRECTLY from stateRef for fresh values
-        // CRITICAL: Calculate filters directly from manualAdjustments for instant preview
         const currentFilters = stateRef.current.filters;
         const manualAdj = stateRef.current.manualAdjustments;
 
-        // Calculate effective filter values with manual adjustments applied directly
-        // This ensures slider changes are immediately visible
         const f = {
           brightness: Math.max(50, Math.min(200,
             (typeof currentFilters.brightness === 'number' ? currentFilters.brightness : 100)
@@ -906,52 +818,40 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           ))
         };
 
-        // Clamp values to reasonable ranges (UPDATED to match new ranges)
         f.brightness = Math.max(50, Math.min(200, f.brightness));
         f.contrast = Math.max(50, Math.min(200, f.contrast));
         f.saturate = Math.max(50, Math.min(300, f.saturate));
         f.warmth = Math.max(-75, Math.min(75, f.warmth));
 
-        // VIDEO STABILIZATION: Apply smooth offset to reduce shake
         let drawX = 0;
         let drawY = 0;
         let drawWidth = vw;
         let drawHeight = vh;
 
         if (stabilizationEnabled) {
-          // Calculate stabilization crop (10% margin for stabilization)
           const stabilizationMargin = 0.05; // 5% on each side
           const cropMargin = Math.min(vw, vh) * stabilizationMargin;
 
-          // Smooth the offset using exponential moving average
           const smoothingFactor = 0.7; // Higher = more smoothing, less responsive
           const stab = stabilizationRef.current;
 
-          // Apply smoothing to offset
           stab.smoothX = stab.smoothX * smoothingFactor + stab.offsetX * (1 - smoothingFactor);
           stab.smoothY = stab.smoothY * smoothingFactor + stab.offsetY * (1 - smoothingFactor);
 
-          // Apply stabilized offset
           drawX = -cropMargin + stab.smoothX;
           drawY = -cropMargin + stab.smoothY;
           drawWidth = vw + cropMargin * 2;
           drawHeight = vh + cropMargin * 2;
         }
 
-        // PERFORMANCE OPTIMIZATION: Use CSS filter (GPU-accelerated) instead of pixel processing
-        // Build filter string with warmth as sepia/hue-rotate
         let filterStr = `brightness(${f.brightness / 100}) contrast(${f.contrast / 100}) saturate(${f.saturate / 100})`;
         if (f.warmth > 0) filterStr += ` sepia(${f.warmth * 0.004})`;
         else if (f.warmth < 0) filterStr += ` hue-rotate(${f.warmth * 0.6}deg)`;
 
-        // Apply CSS filter directly to canvas element (more reliable than ctx.filter)
-        // This is GPU-accelerated and works across all browsers
         canvas.style.filter = filterStr;
 
-        // Draw video without ctx.filter (since we're using canvas.style.filter)
         ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight, 0, 0, vw, vh);
 
-        // Draw focus frame
         if (state.marker) {
           const px = (state.marker.x / 100) * vw;
           const py = (state.marker.y / 100) * vh;
@@ -1025,13 +925,11 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           }
         }
 
-        // Draw grid overlay (九宮格) - Use ref to get current value
         if (showGridRef.current) {
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
           ctx.lineWidth = 1.5;
           ctx.setLineDash([]);
 
-          // Vertical lines (1/3 and 2/3)
           ctx.beginPath();
           ctx.moveTo(vw / 3, 0);
           ctx.lineTo(vw / 3, vh);
@@ -1042,7 +940,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           ctx.lineTo((vw / 3) * 2, vh);
           ctx.stroke();
 
-          // Horizontal lines (1/3 and 2/3)
           ctx.beginPath();
           ctx.moveTo(0, vh / 3);
           ctx.lineTo(vw, vh / 3);
@@ -1053,7 +950,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           ctx.lineTo(vw, (vh / 3) * 2);
           ctx.stroke();
 
-          // Draw small circles at intersection points (golden ratio points)
           ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
           const intersections = [
             { x: vw / 3, y: vh / 3 },
@@ -1075,7 +971,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     loop();
   }, []); // No dependency needed - using ref
 
-  // Handle click
   const handleCanvasClick = (e) => {
     if (!cameraReady) return;
 
@@ -1093,7 +988,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     setDetectedObject(null);
   };
 
-  // Clear marker
   const clearMarker = () => {
     stateRef.current.marker = null;
     stateRef.current.frameSize = { width: 20, height: 20 };
@@ -1105,12 +999,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     setCameraSettings(null);
   };
 
-  // Switch camera
   const switchCamera = () => {
     setFacingMode(prev => prev === 'environment' ? 'user' : 'environment');
   };
 
-  // Effects
   useEffect(() => {
     if (isOpen) loadModel();
     return () => { modelRef.current = null; };
@@ -1127,10 +1019,8 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     };
   }, [isOpen, facingMode, capturedImage, capturedImages, multiCaptureMode, modelReady, modelLoading, initCamera]);
 
-  // Trigger immediate analysis when mode changes
   useEffect(() => {
     if (cameraReady && !multiCaptureMode && !capturedImage) {
-      // Small delay to ensure state is updated
       const timeoutId = setTimeout(() => {
         triggerImmediateAnalysis();
       }, 50);
@@ -1138,7 +1028,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   }, [selectedMode, cameraReady, multiCaptureMode, capturedImage, triggerImmediateAnalysis]);
 
-  // Take photo with specific mode
   const capturePhotoWithMode = (modeId = selectedMode, returnRaw = false) => {
     const video = videoRef.current;
     if (!video) return null;
@@ -1146,18 +1035,12 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     const width = video.videoWidth;
     const height = video.videoHeight;
 
-    // CRITICAL: Use the current filters from stateRef - this includes:
-    // - Mode parameters
-    // - AI analysis adjustments  
-    // - Manual adjustments
-    // - User preferences
     const filtersToUse = { ...stateRef.current.filters };
     const currentManualAdj = { ...stateRef.current.manualAdjustments };
 
     console.log('📸 Capturing with filters:', filtersToUse);
     console.log('📸 Manual adjustments:', currentManualAdj);
 
-    // Ensure filters are valid numbers
     const f = {
       brightness: typeof filtersToUse.brightness === 'number' ? filtersToUse.brightness : 100,
       contrast: typeof filtersToUse.contrast === 'number' ? filtersToUse.contrast : 100,
@@ -1165,13 +1048,11 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       warmth: typeof filtersToUse.warmth === 'number' ? filtersToUse.warmth : 0
     };
 
-    // Clamp values to reasonable ranges - match preview loop ranges
     f.brightness = Math.max(50, Math.min(200, f.brightness));
     f.contrast = Math.max(50, Math.min(200, f.contrast));
     f.saturate = Math.max(50, Math.min(300, f.saturate));
     f.warmth = Math.max(-75, Math.min(75, f.warmth));
 
-    // Build filter string exactly as preview does
     let filterStr = `brightness(${f.brightness / 100}) contrast(${f.contrast / 100}) saturate(${f.saturate / 100})`;
     if (f.warmth > 0) {
       filterStr += ` sepia(${f.warmth * 0.004})`;
@@ -1181,7 +1062,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
     console.log('📸 Filter string:', filterStr);
 
-    // Create canvas and context
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -1189,15 +1069,11 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
     let rawData = null;
     if (returnRaw) {
-      // Draw raw image first (no filter)
       ctx.drawImage(video, 0, 0, width, height);
       rawData = canvas.toDataURL('image/jpeg', 1.0);
-      // Clear for next draw
       ctx.clearRect(0, 0, width, height);
     }
 
-    // Apply filter using standard Canvas 2D API
-    // This works in Chrome, Firefox, Safari (recent versions)
     ctx.filter = filterStr;
     ctx.drawImage(video, 0, 0, width, height);
     ctx.filter = 'none';
@@ -1212,9 +1088,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     return imageData;
   };
 
-  // Take photo (single mode)
   const capturePhoto = () => {
-    // Stop all AI analysis immediately
     if (detectIntervalRef.current) {
       clearInterval(detectIntervalRef.current);
       detectIntervalRef.current = null;
@@ -1246,18 +1120,14 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       mode: selectedMode
     });
 
-    // Reset like status for new photo
     setIsPhotoLiked(false);
     setPreferenceApplied(false);
 
-    // Reset AI analysis for new photo
     setAnalysisResult(null);
     setShowAnalysisPanel(false);
 
-    // Save the current adjustments at capture time
     setCapturedAdjustments({ ...manualAdjustments });
 
-    // Record preference for learning (will be updated if user likes it)
     if (currentContext && cameraSettings) {
       const modeParams = preferenceService.getModeParams(selectedMode);
       preferenceService.recordPreference(
@@ -1272,7 +1142,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         }
       );
 
-      // Record to user profile service (local)
       userProfileService.recordPhotoCapture({
         mode: selectedMode,
         filters: stateRef.current.filters,
@@ -1282,8 +1151,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         zoom: stateRef.current.zoom,
       });
 
-      // 🧠 AI Learning: 發送參數到 Firebase 後端記錄
-      // 每次按下快門時，完整記錄使用者的拍照參數供 AI 學習
       if (currentUser && recordPhotoLearning) {
         recordPhotoLearning({
           mode: selectedMode,
@@ -1302,14 +1169,12 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       }
     }
 
-    // Clear marker and detection state
     stateRef.current.marker = null;
     stateRef.current.detectedObject = null;
     setMarkerPosition(null);
     setDetectedObject(null);
     setCameraSettings(null);
 
-    // Stop video stream
     if (streamRef.current) {
       try {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -1322,12 +1187,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     setCameraReady(false);
   };
 
-  // Capture AI variations - instant 5 color-toned photos
   const captureAIVariations = async () => {
     if (!cameraReady || !videoRef.current) return;
 
     try {
-      // Stop all AI analysis immediately to prevent interference
       if (detectIntervalRef.current) {
         clearInterval(detectIntervalRef.current);
         detectIntervalRef.current = null;
@@ -1340,7 +1203,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       setMultiCaptureMode(true);
       const video = videoRef.current;
 
-      // Verify video is still valid
       if (!video || video.readyState < 2) {
         throw new Error('Video not ready');
       }
@@ -1348,7 +1210,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       setCaptureProgress({ current: 0, total: 5 });
       console.log('📸 Starting AI Smart Capture');
 
-      // 1. Capture base frame once
       const baseCanvas = document.createElement('canvas');
       const baseCtx = baseCanvas.getContext('2d');
       const width = video.videoWidth;
@@ -1362,7 +1223,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       baseCanvas.height = height;
       baseCtx.drawImage(video, 0, 0, width, height);
 
-      // 2. Get AI base filters (current AI adjustments without manual changes)
       const currentFilters = { ...stateRef.current.filters };
       const manualAdj = manualAdjustments;
 
@@ -1373,7 +1233,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         warmth: currentFilters.warmth - manualAdj.warmth
       };
 
-      // 3. Define 5 variation presets (without icons as requested)
       const variations = [
         {
           id: 'natural',
@@ -1407,7 +1266,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         }
       ];
 
-      // 4. Generate all variations instantly
       const captured = {};
 
       for (let i = 0; i < variations.length; i++) {
@@ -1415,7 +1273,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         const variation = variations[i];
 
         try {
-          // Calculate filters for this variation
           const filters = {
             brightness: aiBase.brightness + variation.adjustments.brightness,
             contrast: aiBase.contrast + variation.adjustments.contrast,
@@ -1423,19 +1280,16 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             warmth: aiBase.warmth + variation.adjustments.warmth
           };
 
-          // Clamp to valid ranges
           filters.brightness = Math.max(50, Math.min(150, filters.brightness));
           filters.contrast = Math.max(50, Math.min(150, filters.contrast));
           filters.saturate = Math.max(50, Math.min(200, filters.saturate));
           filters.warmth = Math.max(-50, Math.min(50, filters.warmth));
 
-          // Create canvas for this variation
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
           canvas.width = width;
           canvas.height = height;
 
-          // Build filter string (for logging)
           let filterStr = `brightness(${filters.brightness}%) contrast(${filters.contrast}%) saturate(${filters.saturate}%)`;
           if (filters.warmth > 0) {
             filterStr += ` sepia(${filters.warmth * 0.4}%)`;
@@ -1445,42 +1299,33 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
           console.log(`🎨 Generating ${variation.nameEn} with filters:`, filters);
 
-          // MOBILE FIX: Apply filters manually via pixel manipulation
-          // Draw base image first
           ctx.drawImage(baseCanvas, 0, 0);
 
-          // Get image data and apply filters pixel by pixel
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const data = imageData.data;
 
-          // Calculate filter multipliers
           const brightnessMult = filters.brightness / 100;
           const contrastMult = filters.contrast / 100;
           const saturateMult = filters.saturate / 100;
 
-          // Apply filters pixel by pixel (use 'px' to avoid variable conflict with outer loop 'i')
           for (let px = 0; px < data.length; px += 4) {
             let r = data[px];
             let g = data[px + 1];
             let b = data[px + 2];
 
-            // Apply brightness
             r *= brightnessMult;
             g *= brightnessMult;
             b *= brightnessMult;
 
-            // Apply contrast
             r = ((r / 255 - 0.5) * contrastMult + 0.5) * 255;
             g = ((g / 255 - 0.5) * contrastMult + 0.5) * 255;
             b = ((b / 255 - 0.5) * contrastMult + 0.5) * 255;
 
-            // Apply saturation
             const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
             r = gray + (r - gray) * saturateMult;
             g = gray + (g - gray) * saturateMult;
             b = gray + (b - gray) * saturateMult;
 
-            // Apply warmth
             if (filters.warmth > 0) {
               r += filters.warmth * 0.8;
               g += filters.warmth * 0.4;
@@ -1489,16 +1334,13 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               g -= filters.warmth * 0.4;
             }
 
-            // Clamp values
             data[px] = Math.max(0, Math.min(255, r));
             data[px + 1] = Math.max(0, Math.min(255, g));
             data[px + 2] = Math.max(0, Math.min(255, b));
           }
 
-          // Put the filtered image data back
           ctx.putImageData(imageData, 0, 0);
 
-          // Convert to image data
           const finalImageData = canvas.toDataURL('image/jpeg', 0.95);
 
           if (finalImageData && finalImageData.length > 100 && finalImageData.startsWith('data:image')) {
@@ -1522,22 +1364,18 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       setCaptureProgress({ current: 5, total: 5 });
       console.log(`📸 AI Smart Capture complete. Generated ${Object.keys(captured).length} variations`);
 
-      // Store raw base image for potential re-processing
       setRawBaseImage(baseCanvas.toDataURL('image/jpeg', 1.0));
 
-      // Update state
       setCapturedImages(captured);
       setMultiCaptureMode(false);
       setCaptureProgress({ current: 0, total: 0 });
 
-      // Clear marker and detection state
       stateRef.current.marker = null;
       stateRef.current.detectedObject = null;
       setMarkerPosition(null);
       setDetectedObject(null);
       setCameraSettings(null);
 
-      // Stop video stream
       if (streamRef.current) {
         try {
           streamRef.current.getTracks().forEach(track => track.stop());
@@ -1552,7 +1390,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     } catch (error) {
       console.error('Error in captureAIVariations:', error);
 
-      // Ensure cleanup on error
       if (detectIntervalRef.current) {
         clearInterval(detectIntervalRef.current);
         detectIntervalRef.current = null;
@@ -1574,14 +1411,12 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     if (!capturedImage) return;
 
     try {
-      // Check if there are any adjustments to apply
       const hasAdjustments = manualAdjustments.brightness !== 0 || 
                              manualAdjustments.contrast !== 0 || 
                              manualAdjustments.saturation !== 0 || 
                              manualAdjustments.warmth !== 0;
 
       if (!hasAdjustments) {
-        // No adjustments, download original
         const link = document.createElement('a');
         link.href = capturedImage;
         link.download = `food-photo-${Date.now()}-${photoInfo?.width || 'unknown'}x${photoInfo?.height || 'unknown'}.jpg`;
@@ -1592,7 +1427,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         return;
       }
 
-      // Apply adjustments using canvas
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
@@ -1601,10 +1435,8 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         canvas.width = img.width;
         canvas.height = img.height;
 
-        // Draw the original image
         ctx.drawImage(img, 0, 0);
 
-        // Get image data and apply adjustments pixel by pixel
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
 
@@ -1618,23 +1450,19 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           let g = data[i + 1];
           let b = data[i + 2];
 
-          // Apply brightness
           r *= brightnessMult;
           g *= brightnessMult;
           b *= brightnessMult;
 
-          // Apply contrast
           r = ((r / 255 - 0.5) * contrastMult + 0.5) * 255;
           g = ((g / 255 - 0.5) * contrastMult + 0.5) * 255;
           b = ((b / 255 - 0.5) * contrastMult + 0.5) * 255;
 
-          // Apply saturation
           const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
           r = gray + (r - gray) * saturateMult;
           g = gray + (g - gray) * saturateMult;
           b = gray + (b - gray) * saturateMult;
 
-          // Apply warmth
           if (warmth > 0) {
             r += warmth * 0.8;
             g += warmth * 0.4;
@@ -1643,7 +1471,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             g -= warmth * 0.4;
           }
 
-          // Clamp values
           data[i] = Math.max(0, Math.min(255, r));
           data[i + 1] = Math.max(0, Math.min(255, g));
           data[i + 2] = Math.max(0, Math.min(255, b));
@@ -1651,7 +1478,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
         ctx.putImageData(imageData, 0, 0);
 
-        // Download the adjusted image
         const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
         const link = document.createElement('a');
         link.href = dataUrl;
@@ -1663,7 +1489,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       };
       img.onerror = () => {
         console.error('Image load error for download');
-        // Fallback: download original
         const link = document.createElement('a');
         link.href = capturedImage;
         link.download = `food-photo-${Date.now()}.jpg`;
@@ -1672,7 +1497,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       img.src = capturedImage;
     } catch (error) {
       console.error('Download error:', error);
-      // Fallback: open in new tab
       window.open(capturedImage, '_blank');
     }
   };
@@ -1692,14 +1516,12 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
 
-        // Check if there are any adjustments to apply
         const hasAdjustments = manualAdjustments.brightness !== 0 || 
                                manualAdjustments.contrast !== 0 || 
                                manualAdjustments.saturation !== 0 || 
                                manualAdjustments.warmth !== 0;
 
         if (hasAdjustments) {
-          // Apply adjustments pixel by pixel
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const data = imageData.data;
 
@@ -1713,23 +1535,19 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             let g = data[i + 1];
             let b = data[i + 2];
 
-            // Apply brightness
             r *= brightnessMult;
             g *= brightnessMult;
             b *= brightnessMult;
 
-            // Apply contrast
             r = ((r / 255 - 0.5) * contrastMult + 0.5) * 255;
             g = ((g / 255 - 0.5) * contrastMult + 0.5) * 255;
             b = ((b / 255 - 0.5) * contrastMult + 0.5) * 255;
 
-            // Apply saturation
             const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
             r = gray + (r - gray) * saturateMult;
             g = gray + (g - gray) * saturateMult;
             b = gray + (b - gray) * saturateMult;
 
-            // Apply warmth
             if (warmth > 0) {
               r += warmth * 0.8;
               g += warmth * 0.4;
@@ -1738,7 +1556,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               g -= warmth * 0.4;
             }
 
-            // Clamp values
             data[i] = Math.max(0, Math.min(255, r));
             data[i + 1] = Math.max(0, Math.min(255, g));
             data[i + 2] = Math.max(0, Math.min(255, b));
@@ -1758,24 +1575,20 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       };
       img.onerror = () => {
         console.error('Image load error');
-        // Fallback: try to download as JPG
         downloadPhoto(e);
       };
       img.src = capturedImage;
     } catch (error) {
       console.error('PNG download error:', error);
-      // Fallback: download as JPG
       downloadPhoto(e);
     }
   };
 
-  // Handle like photo - record preference with higher weight
   const handleLikePhoto = () => {
     if (!capturedImage) return;
 
     setIsPhotoLiked(true);
 
-    // Record preference with "liked" flag for higher weight (local storage)
     if (currentContext && cameraSettings) {
       const modeParams = preferenceService.getModeParams(selectedMode);
       preferenceService.recordPreference(
@@ -1800,22 +1613,18 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       });
     }
 
-    // ALWAYS sync liked photo to cloud if user is logged in (don't depend on cameraSettings)
     if (currentUser && updateUserProfile && userProfile) {
       console.log('☁️ Syncing liked photo to cloud...', { currentUser: currentUser.uid, userProfile });
 
-      // Increment liked photos count
       const currentStats = userProfile.stats || { totalPhotos: 0, likedPhotos: 0, photosThisMonth: 0 };
       const newStats = {
         ...currentStats,
         likedPhotos: (currentStats.likedPhotos || 0) + 1,
       };
 
-      // Get current learned adjustments and give higher weight to liked photos
       const currentLearned = userProfile.learnedAdjustments || { brightness: 0, contrast: 0, saturation: 0, warmth: 0 };
       const likedCount = (currentStats.likedPhotos || 0) + 1;
 
-      // Liked photos have 3x weight in learning
       const weight = 3;
       const totalWeight = likedCount * weight;
       const previousWeight = (likedCount - 1) * weight;
@@ -1827,7 +1636,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         warmth: ((currentLearned.warmth * previousWeight) + (manualAdjustments.warmth * weight)) / totalWeight,
       };
 
-      // Determine AI patterns based on liked photos
       const aiPatterns = {
         colorTendency: manualAdjustments.warmth > 5 ? 'warm' : manualAdjustments.warmth < -5 ? 'cool' : 'neutral',
         saturationPreference: manualAdjustments.saturation > 10 ? 'high' : manualAdjustments.saturation < -10 ? 'low' : 'normal',
@@ -1835,7 +1643,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         contrastPreference: manualAdjustments.contrast > 10 ? 'high' : manualAdjustments.contrast < -10 ? 'low' : 'normal',
       };
 
-      // Update cloud profile
       updateUserProfile({
         stats: newStats,
         learnedAdjustments: newLearnedAdjustments,
@@ -1857,7 +1664,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     console.log('❤️ Photo marked as liked');
   };
 
-  // 儲存照片到個人檔案
   const saveToProfile = async () => {
     if (!currentUser || !capturedImage) {
       console.log('⚠️ Cannot save: no user or no captured image');
@@ -1893,7 +1699,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   };
 
-  // 分享拍攝參數到餐廳
   const shareToRestaurant = async () => {
     if (!currentUser || !selectedRestaurant || !capturedImage) {
       console.log('⚠️ Cannot share: missing requirements');
@@ -1920,7 +1725,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       setShared(true);
       console.log('✅ Photo params shared to restaurant:', selectedRestaurant.name);
 
-      // 通知 App.js 觸發 MapView 重新載入
       if (onPhotoShared) {
         onPhotoShared();
       }
@@ -1931,7 +1735,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   };
 
-  // AI 照片分析 - 提供拍攝改進建議（手動觸發，顯示面板）
   const analyzePhoto = async () => {
     if (!capturedImage) {
       console.log('⚠️ No captured image to analyze');
@@ -1962,14 +1765,12 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       console.log('✅ AI analysis completed:', result);
     } catch (error) {
       console.error('❌ AI analysis failed:', error);
-      // 使用預設建議
       setAnalysisResult(photoAnalysisService.getDefaultSuggestions(currentLanguage));
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // AI 照片分析 - 自動觸發（不顯示面板，背景分析）
   const analyzePhotoAuto = async () => {
     if (!capturedImage || isAnalyzing) {
       console.log('⏭️ Skipping auto analysis:', { hasCapturedImage: !!capturedImage, isAnalyzing });
@@ -1979,7 +1780,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     setIsAnalyzing(true);
 
     try {
-      // 記錄圖片的唯一標識（使用前50個字符作為識別）
       const imageId = capturedImage.substring(0, 80);
       console.log('🤖 Auto AI analysis started for image:', imageId);
       
@@ -1998,7 +1798,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
       setAnalysisResult(result);
       
-      // 詳細記錄分析結果來源
       if (result._source === 'ai') {
         console.log('✅ Auto AI analysis completed for image:', imageId);
         console.log('✅ Result from: AI Vision API');
@@ -2010,7 +1809,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       }
     } catch (error) {
       console.error('❌ Auto AI analysis failed:', error);
-      // 使用預設建議
       const fallback = photoAnalysisService.getDefaultSuggestions(currentLanguage);
       fallback._source = 'error';
       fallback._error = error.message;
@@ -2021,13 +1819,11 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   };
 
-  // 應用 AI 建議的調整
   const applyAISuggestions = () => {
     if (!analysisResult?.colorFeedback) return;
 
     const adjustments = photoAnalysisService.generateAdjustmentPreset(analysisResult.colorFeedback);
     
-    // 應用調整到當前設定
     setManualAdjustments(prev => ({
       brightness: (prev?.brightness || 0) + adjustments.brightness,
       contrast: (prev?.contrast || 0) + adjustments.contrast,
@@ -2038,7 +1834,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     console.log('✅ Applied AI suggestions:', adjustments);
   };
 
-  // Update adjustments for a specific multi-capture photo and regenerate its image
   const updateMultiPhotoAdjustments = useCallback((photoId, adjustmentType, value) => {
     if (!photoId || !capturedImages[photoId]) return;
 
@@ -2048,7 +1843,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       [adjustmentType]: value
     };
 
-    // Calculate final filters: base + user adjustments
     const finalFilters = {
       brightness: photo.baseFilters.brightness + newUserAdjustments.brightness,
       contrast: photo.baseFilters.contrast + newUserAdjustments.contrast,
@@ -2056,7 +1850,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       warmth: photo.baseFilters.warmth + newUserAdjustments.warmth
     };
 
-    // Clamp to valid ranges
     finalFilters.brightness = Math.max(50, Math.min(200, finalFilters.brightness));
     finalFilters.contrast = Math.max(50, Math.min(200, finalFilters.contrast));
     finalFilters.saturate = Math.max(50, Math.min(250, finalFilters.saturate));
@@ -2064,7 +1857,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
     console.log('🎨 Updating photo:', photoId, 'with filters:', finalFilters);
 
-    // Regenerate image with new filters
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -2073,7 +1865,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
 
-      // Get image data and apply filters
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
 
@@ -2086,23 +1877,19 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         let g = data[i + 1];
         let b = data[i + 2];
 
-        // Apply brightness
         r *= brightnessMult;
         g *= brightnessMult;
         b *= brightnessMult;
 
-        // Apply contrast
         r = ((r / 255 - 0.5) * contrastMult + 0.5) * 255;
         g = ((g / 255 - 0.5) * contrastMult + 0.5) * 255;
         b = ((b / 255 - 0.5) * contrastMult + 0.5) * 255;
 
-        // Apply saturation
         const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
         r = gray + (r - gray) * saturateMult;
         g = gray + (g - gray) * saturateMult;
         b = gray + (b - gray) * saturateMult;
 
-        // Apply warmth
         if (finalFilters.warmth > 0) {
           r += finalFilters.warmth * 0.8;
           g += finalFilters.warmth * 0.4;
@@ -2111,7 +1898,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           g -= finalFilters.warmth * 0.4;
         }
 
-        // Clamp values
         data[i] = Math.max(0, Math.min(255, r));
         data[i + 1] = Math.max(0, Math.min(255, g));
         data[i + 2] = Math.max(0, Math.min(255, b));
@@ -2122,7 +1908,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
       console.log('✅ Image regenerated for:', photoId);
 
-      // Update capturedImages state
       setCapturedImages(prev => ({
         ...prev,
         [photoId]: {
@@ -2132,7 +1917,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         }
       }));
 
-      // Also update selectedPhoto to show the change immediately in the preview
       setSelectedPhoto(prev => {
         if (prev && prev.id === photoId) {
           return {
@@ -2168,7 +1952,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     setIsSavingPhoto(false);
     setShared(false);  // 重置分享狀態
     setSelectedRestaurant(null);  // 重置餐廳選擇
-    // 重置 AI 分析狀態
     setAnalysisResult(null);
     setShowAnalysisPanel(false);
     setIsAnalyzing(false);
@@ -2177,7 +1960,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
   };
 
   const handleClose = () => {
-    // 完整清理所有 refs 和 intervals
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
       animationRef.current = null;
@@ -2195,10 +1977,8 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       streamRef.current = null;
     }
 
-    // 清理 track ref
     trackRef.current = null;
 
-    // 重置 stateRef
     stateRef.current = {
       marker: null,
       frameSize: { width: 20, height: 20 },
@@ -2208,7 +1988,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       manualAdjustments: { brightness: 0, contrast: 0, saturation: 0, warmth: 0 }
     };
 
-    // 重置所有狀態
     setCameraReady(false);
     setCapturedImage(null);
     setCapturedImages({});
@@ -2235,7 +2014,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     setPhotoInfo(null);
     setIsSavingPhoto(false);
     setPhotoSaved(false);
-    // 重置 AI 分析狀態
     setAnalysisResult(null);
     setShowAnalysisPanel(false);
     setIsAnalyzing(false);
@@ -2243,7 +2021,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     onClose();
   };
 
-  // Get warmth display text
   const getWarmthText = () => {
     if (!cameraSettings) return '';
     if (cameraSettings.warmth > 0) return t('camera.warmthWarm');
@@ -2251,7 +2028,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     return t('camera.warmthNeutral');
   };
 
-  // Apply suggested preference
   const applySuggestedPreference = () => {
     if (!suggestedPreference) return;
 
@@ -2267,7 +2043,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     setSuggestedPreference(null);
   };
 
-  // 檢查並顯示使用者偏好建議
   const checkAndShowProfileSuggestion = useCallback(() => {
     if (suggestionDismissed) return; // 如果使用者已經關閉過，不再顯示
 
@@ -2280,10 +2055,8 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   }, [currentContext, suggestionDismissed]);
 
-  // 當物件被偵測到時，檢查是否有偏好建議
   useEffect(() => {
     if (cameraReady && detectedObject && currentContext && !capturedImage && !suggestionDismissed) {
-      // 延遲一點時間再顯示建議，避免太快
       const timer = setTimeout(() => {
         checkAndShowProfileSuggestion();
       }, 1500);
@@ -2291,18 +2064,15 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   }, [cameraReady, detectedObject, currentContext, capturedImage, suggestionDismissed, checkAndShowProfileSuggestion]);
 
-  // 套用使用者偏好建議
   const applyProfileSuggestion = () => {
     if (!profileSuggestion) return;
 
     console.log('✅ Applying profile suggestion:', profileSuggestion);
 
-    // 套用模式
     if (profileSuggestion.mode) {
       setSelectedMode(profileSuggestion.mode);
     }
 
-    // 套用手動調整
     if (profileSuggestion.adjustments) {
       const adjustments = {
         brightness: profileSuggestion.adjustments.brightness || 0,
@@ -2313,11 +2083,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       setManualAdjustments(adjustments);
       stateRef.current.manualAdjustments = adjustments;
 
-      // 立即更新濾鏡
       updateFiltersImmediately('brightness', adjustments.brightness);
     }
 
-    // 如果有濾鏡設定，也套用
     if (profileSuggestion.filters) {
       stateRef.current.filters = { ...profileSuggestion.filters };
     }
@@ -2327,7 +2095,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     setProfileSuggestion(null);
   };
 
-  // 關閉偏好建議彈窗
   const dismissProfileSuggestion = () => {
     setShowProfileSuggestion(false);
     setProfileSuggestion(null);
@@ -2336,21 +2103,20 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
   if (!isOpen) return null;
 
-  // Define wrapper classes based on embedded mode
   const wrapperClass = isEmbedded
     ? "fixed inset-0 flex flex-col bg-black" // No tab bar padding needed - parent handles it
     : "fixed inset-0 backdrop-overlay flex items-center justify-center p-0 sm:p-4 z-50";
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col z-50 safe-area-top safe-area-bottom">
-      {/* Main Camera View - Full Screen */}
+      
       <div className="relative flex-1 overflow-hidden bg-black">
-        {/* Video & Canvas Layers */}
-        {/* Priority: 1. Multi-capture results, 2. Single captured image, 3. Camera preview */}
+        
+        
         {Object.keys(capturedImages).length > 0 && !capturedImage ? (
           /* Multi-Capture Results - 5 Mode Photos Grid */
           <div className="relative w-full h-full bg-black flex flex-col">
-            {/* Header with Back Button - Fixed at top with high z-index */}
+            
             <div className="sticky top-0 z-30 flex items-center justify-between px-4 py-4 bg-black/90 backdrop-blur-sm border-b border-white/10 safe-area-top">
               <button
                 onClick={() => {
@@ -2370,7 +2136,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               <span className="text-gray-400 text-sm">{Object.keys(capturedImages).length} 張</span>
             </div>
 
-            {/* Photos Grid */}
+            
             <div className="flex-1 overflow-y-auto pb-32 px-2">
               <div className="grid grid-cols-2 gap-2 p-2">
                 {Object.entries(capturedImages).map(([modeId, data]) => (
@@ -2409,7 +2175,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             </div>
 
-            {/* Bottom Actions */}
+            
             <div 
               className="absolute left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent pt-6 pb-6 px-4"
               style={{ bottom: isEmbedded ? '80px' : '0px' }}
@@ -2448,16 +2214,14 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         ) : capturedImage ? (
           /* Single Captured Image Preview */
           <div className="relative w-full h-full bg-black flex flex-col">
-            {/* Top Bar with Back Button - Fixed with high z-index */}
+            
             <div className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-black/90 backdrop-blur-sm border-b border-white/10 safe-area-top">
               <button
                 onClick={() => {
-                  // If came from multi-capture, go back to multi-capture view
                   if (Object.keys(capturedImages).length > 0) {
                     setCapturedImage(null);
                     setAnalysisResult(null);
                   } else {
-                    // Otherwise go back to camera
                     retakePhoto();
                   }
                 }}
@@ -2475,7 +2239,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </button>
             </div>
 
-            {/* Image with live filter adjustments */}
+            
             <div className="flex-1 flex items-center justify-center overflow-hidden pb-64">
               <img
                 src={capturedImage}
@@ -2493,12 +2257,12 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               />
             </div>
 
-            {/* Bottom Action Panel */}
+            
             <div 
               className="absolute left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent pt-8 pb-8 px-4"
               style={{ bottom: isEmbedded ? '80px' : '0px' }}
             >
-              {/* AI Analysis Button */}
+              
               <button
                 onClick={analyzePhoto}
                 disabled={isAnalyzing}
@@ -2533,7 +2297,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                 )}
               </button>
 
-              {/* Restaurant Selection */}
+              
               <button
                 onClick={() => setShowRestaurantPicker(true)}
                 className="w-full mb-3 p-3 bg-white/10 backdrop-blur-sm rounded-xl flex items-center gap-3 border border-white/20 active:scale-[0.98] transition-all"
@@ -2552,7 +2316,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                 <ChevronRight className="w-5 h-5 text-gray-400" />
               </button>
 
-              {/* Action Buttons */}
+              
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleLikePhoto}
@@ -2621,7 +2385,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                 )}
               </div>
 
-              {/* Retake Button */}
+              
               <button
                 onClick={retakePhoto}
                 className="w-full mt-4 py-3 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center gap-2"
@@ -2642,7 +2406,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             />
             <canvas ref={canvasRef} className="hidden" />
 
-            {/* Loading / Error States */}
+            
             {!cameraReady && !error && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
                 <Loader2 className="w-10 h-10 text-green-400 animate-spin" />
@@ -2658,7 +2422,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             )}
 
-            {/* Multi-Capture Progress Indicator */}
+            
             {multiCaptureMode && captureProgress.total > 0 && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-30">
                 <div className="text-center p-6 bg-gray-900/90 rounded-2xl backdrop-blur-sm border border-white/10">
@@ -2699,7 +2463,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             )}
 
-            {/* Focus Marker */}
+            
             {markerPosition && (
               <div
                 className="absolute pointer-events-none border-2 border-yellow-400 w-16 h-16 -ml-8 -mt-8 transition-all duration-200"
@@ -2707,7 +2471,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               />
             )}
 
-            {/* Zoom Controls - Hidden when adjustments panel is open */}
+            
             {supportsZoom && !showAdjustmentsPopup && (
               <div 
                 className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 z-20"
@@ -2734,11 +2498,11 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         )}
       </div>
 
-      {/* Top Control Bar - Only show when in camera preview mode (not in results or captured image) */}
+      
       {!capturedImage && Object.keys(capturedImages).length === 0 && (
         <div className="absolute top-0 left-0 right-0 z-20 safe-area-top">
           <div className="flex justify-between items-center px-4 pt-3 pb-2">
-            {/* Left side - Settings button */}
+            
             <button 
               onClick={() => setShowSettingsPopup(true)} 
               className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/90 hover:bg-black/60 transition-all"
@@ -2746,7 +2510,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               <Settings className="w-5 h-5" />
             </button>
 
-          {/* Right side - Grid and Camera switch */}
+          
           <div className="flex gap-3">
             <button 
               onClick={() => setShowGrid(!showGrid)} 
@@ -2767,9 +2531,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       </div>
       )}
 
-      {/* Bottom Control Bar */}
+      
       <div className={`camera-bottom-bar ${isEmbedded ? 'embedded' : ''}`}>
-        {/* Left: Gallery / Profile */}
+        
         <button className="w-12 h-12 rounded-lg bg-gray-800 overflow-hidden border border-white/20">
           {capturedImage ? (
             <img src={capturedImage} className="w-full h-full object-cover" alt="Preview" />
@@ -2780,9 +2544,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           )}
         </button>
 
-        {/* Center: Shutter buttons */}
+        
         <div className="flex items-center gap-3">
-          {/* One-Click 5 Modes Capture Button */}
+          
           {!capturedImage && !multiCaptureMode && cameraReady && (
             <button 
               onClick={captureAIVariations}
@@ -2793,7 +2557,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             </button>
           )}
           
-          {/* Main Shutter (or Retake if captured) */}
+          
           {!capturedImage ? (
             <button onClick={capturePhoto} className="shutter-button">
               <div className="shutter-button-inner" />
@@ -2802,7 +2566,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             <button onClick={() => {
               setCapturedImage(null);
               setCapturedImages({});
-              // 重置 AI 分析狀態，確保新照片會重新分析
               setAnalysisResult(null);
               setShowAnalysisPanel(false);
               setIsAnalyzing(false);
@@ -2813,7 +2576,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           )}
         </div>
 
-        {/* Right: Adjustments / Mode */}
+        
         <button
           onClick={() => setShowAdjustmentsPopup(true)}
           className="control-btn"
@@ -2823,16 +2586,16 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         </button>
       </div>
 
-      {/* Popups */}
+      
 
-      {/* Adjustments Strip - Ultra transparent minimal design */}
+      
       {showAdjustmentsPopup && (
         <div
           className="absolute left-0 right-0 z-30 pointer-events-none"
           style={{ bottom: isEmbedded ? '180px' : '120px' }}
         >
           <div className="mx-4 pointer-events-auto">
-            {/* Adjustment Type Selector - Floating pills */}
+            
             <div className="flex items-center justify-center gap-2 mb-3">
               {[
                 { key: 'brightness', label: '亮度' },
@@ -2863,7 +2626,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </button>
             </div>
 
-            {/* Transparent Slider Bar */}
+            
             <div className="flex items-center gap-3 px-2 py-2 rounded-full bg-black/25 backdrop-blur-sm">
               <span className="text-white/80 text-xs w-8 text-center font-medium">{manualAdjustments[activeAdjustment]}</span>
               <input
@@ -2895,21 +2658,21 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         </div>
       )}
 
-      {/* Settings Popup - Slide from left */}
+      
       {showSettingsPopup && (
         <div 
           className="absolute inset-0 z-40 flex"
           onClick={() => setShowSettingsPopup(false)}
         >
-          {/* Semi-transparent backdrop */}
+          
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
           
-          {/* Settings Panel - Slide from left */}
+          
           <div 
             className="relative w-72 max-w-[80%] h-full bg-gray-900/95 backdrop-blur-md safe-area-top safe-area-bottom overflow-y-auto"
             onClick={e => e.stopPropagation()}
           >
-            {/* Header */}
+            
             <div className="sticky top-0 bg-gray-900/95 backdrop-blur-md px-4 py-4 border-b border-white/10">
               <div className="flex justify-between items-center">
                 <h3 className="text-white font-bold text-lg">{t('camera.settings')}</h3>
@@ -2922,9 +2685,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             </div>
 
-            {/* Content */}
+            
             <div className="p-4 space-y-4">
-              {/* Mode Selection */}
+              
               <div>
                 <label className="text-white/60 text-xs uppercase tracking-wider mb-2 block">
                   {t('camera.mode') || '拍攝模式'}
@@ -2953,7 +2716,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                 </div>
               </div>
 
-              {/* Quick Settings */}
+              
               <div className="pt-2 border-t border-white/10">
                 <label className="text-white/60 text-xs uppercase tracking-wider mb-2 block">
                   {t('camera.quickSettings') || '快速設定'}
@@ -2977,10 +2740,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         </div>
       )}
 
-      {/* AI Analysis Panel */}
+      
       {showAnalysisPanel && (
         <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex flex-col">
-          {/* Header */}
+          
           <div className="flex items-center justify-between p-4 pt-12 border-b border-gray-800">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
@@ -2999,7 +2762,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             </button>
           </div>
 
-          {/* Content */}
+          
           <div className="flex-1 overflow-y-auto p-4 pb-32">
             {isAnalyzing ? (
               <div className="flex flex-col items-center justify-center py-20">
@@ -3016,7 +2779,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             ) : analysisResult ? (
               <div className="space-y-4">
-                {/* Overall Score */}
+                
                 <div className="bg-gradient-to-r from-purple-600/30 to-pink-600/30 rounded-2xl p-5 border border-purple-500/30">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-white font-medium">整體評分</span>
@@ -3034,7 +2797,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   <p className="text-purple-300 text-sm mt-3 italic">"{analysisResult.encouragement}"</p>
                 </div>
 
-                {/* Angle Feedback */}
+                
                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
                     <Target className="w-5 h-5 text-blue-400" />
@@ -3047,14 +2810,14 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   </div>
                 </div>
 
-                {/* Color Feedback */}
+                
                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
                     <Palette className="w-5 h-5 text-yellow-400" />
                     <span className="text-white font-bold">🎨 色調調整建議</span>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {/* Brightness */}
+                    
                     <div className="bg-gray-900/50 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-gray-400 text-xs">亮度</span>
@@ -3077,7 +2840,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                       <p className="text-gray-500 text-xs">{analysisResult.colorFeedback.brightness.current}</p>
                     </div>
 
-                    {/* Contrast */}
+                    
                     <div className="bg-gray-900/50 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-gray-400 text-xs">對比度</span>
@@ -3100,7 +2863,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                       <p className="text-gray-500 text-xs">{analysisResult.colorFeedback.contrast.current}</p>
                     </div>
 
-                    {/* Saturation */}
+                    
                     <div className="bg-gray-900/50 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-gray-400 text-xs">飽和度</span>
@@ -3123,7 +2886,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                       <p className="text-gray-500 text-xs">{analysisResult.colorFeedback.saturation.current}</p>
                     </div>
 
-                    {/* Warmth */}
+                    
                     <div className="bg-gray-900/50 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-gray-400 text-xs">色溫</span>
@@ -3148,7 +2911,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   </div>
                 </div>
 
-                {/* Composition Feedback */}
+                
                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
                     <Grid3X3 className="w-5 h-5 text-green-400" />
@@ -3160,7 +2923,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   </div>
                 </div>
 
-                {/* Quick Tips */}
+                
                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
                     <Sparkles className="w-5 h-5 text-yellow-400" />
@@ -3184,7 +2947,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             )}
           </div>
 
-          {/* Footer Actions */}
+          
           {analysisResult && (
             <div className="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-gray-900/95 backdrop-blur-md border-t border-gray-700">
               <div className="flex gap-3">
@@ -3214,7 +2977,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         </div>
       )}
 
-      {/* Restaurant Picker Modal (Re-added) */}
+      
       <RestaurantPicker
         isOpen={showRestaurantPicker}
         onClose={() => setShowRestaurantPicker(false)}
@@ -3223,7 +2986,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           setShowRestaurantPicker(false);
         }}
         onSelectAndShare={async (restaurant) => {
-          // 直接執行分享
           if (!currentUser || !capturedImage) {
             console.log('⚠️ Cannot share: missing requirements', { currentUser: !!currentUser, capturedImage: !!capturedImage });
             throw new Error('請先登入並拍攝照片');
@@ -3247,12 +3009,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               userProfile?.displayName || 'Anonymous'
             );
 
-            // 設置餐廳和分享狀態
             setSelectedRestaurant(restaurant);
             setShared(true);
             console.log('✅ Photo params shared to restaurant:', restaurant.name);
 
-            // 通知 App.js 觸發 MapView 重新載入
             if (onPhotoShared) {
               onPhotoShared();
             }

@@ -1,41 +1,21 @@
-/**
- * Photo Analysis Service
- * 用於分析拍攝照片並提供 AI 改進建議
- */
-
 class PhotoAnalysisService {
   constructor() {
     this.proxyUrl = process.env.REACT_APP_VISION_PROXY_URL || '';
   }
 
-  /**
-   * 分析已拍攝的照片，提供角度和色調改進建議
-   * @param {string} imageBase64 - Base64 encoded image data
-   * @param {Object} metadata - 拍攝參數資訊
-   * @param {string} language - 語言偏好
-   * @returns {Promise<Object>} 分析結果
-   */
   async analyzePhoto(imageBase64, metadata = {}, language = 'zh-TW') {
     const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
     
     try {
-      // 壓縮圖片以加快分析速度
       const compressedImage = await this.compressImage(imageBase64, 600, 0.5);
-      
-      // 構建分析提示
       const prompt = this.buildAnalysisPrompt(metadata, language);
-      
-      // 調用 Vision AI API
       const response = await this.callAnalysisAPI(compressedImage, prompt, requestId);
-      
-      // 解析並返回結果
       const result = this.parseAnalysisResult(response);
       result._source = 'ai';
       result._requestId = requestId;
       return result;
     } catch (error) {
       console.error(`Photo analysis error [${requestId}]:`, error.message);
-      // 返回預設建議
       const fallback = this.getDefaultSuggestions(language);
       fallback._source = 'fallback';
       fallback._error = error.message;
@@ -44,9 +24,6 @@ class PhotoAnalysisService {
     }
   }
 
-  /**
-   * 構建分析提示詞
-   */
   buildAnalysisPrompt(metadata, language) {
     const currentSettings = metadata.filters ? 
       `目前的拍攝設定：亮度 ${metadata.filters.brightness}%，對比度 ${metadata.filters.contrast}%，飽和度 ${metadata.filters.saturate}%，色溫 ${metadata.filters.warmth > 0 ? '+' : ''}${metadata.filters.warmth}` : 
@@ -112,9 +89,6 @@ Please analyze and provide suggestions on:
 Respond in JSON format.`;
   }
 
-  /**
-   * 調用分析 API
-   */
   async callAnalysisAPI(imageBase64, prompt, requestId = 'unknown') {
     const endpoint = this.proxyUrl || '/api';
     
@@ -128,7 +102,6 @@ Respond in JSON format.`;
       }
     };
 
-    // 設置 60 秒超時
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     
@@ -169,20 +142,15 @@ Respond in JSON format.`;
     return data.response;
   }
 
-  /**
-   * 解析 AI 回應
-   */
   parseAnalysisResult(response) {
     try {
       let jsonStr = response;
 
-      // 嘗試從 markdown 代碼塊中提取 JSON
       const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (jsonMatch) {
         jsonStr = jsonMatch[1].trim();
       }
 
-      // 尋找 JSON 對象
       const jsonObjectMatch = jsonStr.match(/\{[\s\S]*\}/);
       if (jsonObjectMatch) {
         jsonStr = jsonObjectMatch[0];
@@ -190,7 +158,6 @@ Respond in JSON format.`;
 
       const result = JSON.parse(jsonStr);
 
-      // 標準化結果
       return {
         overallScore: Math.min(100, Math.max(0, result.overallScore || 70)),
         angleFeedback: {
@@ -229,9 +196,6 @@ Respond in JSON format.`;
     }
   }
 
-  /**
-   * 解析調整值
-   */
   parseAdjustment(value) {
     if (typeof value === 'number') return value;
     if (typeof value === 'string') {
@@ -241,9 +205,6 @@ Respond in JSON format.`;
     return 0;
   }
 
-  /**
-   * 獲取預設建議
-   */
   getDefaultSuggestions(language) {
     return {
       overallScore: 75,
@@ -271,9 +232,6 @@ Respond in JSON format.`;
     };
   }
 
-  /**
-   * 壓縮圖片
-   */
   async compressImage(imageBase64, maxWidth = 800, quality = 0.7) {
     return new Promise((resolve) => {
       const img = new Image();
@@ -301,9 +259,6 @@ Respond in JSON format.`;
     });
   }
 
-  /**
-   * 根據分析結果生成調整建議
-   */
   generateAdjustmentPreset(colorFeedback) {
     return {
       brightness: colorFeedback.brightness.adjust,
@@ -314,7 +269,6 @@ Respond in JSON format.`;
   }
 }
 
-// 創建單例
 const photoAnalysisService = new PhotoAnalysisService();
 
 export default photoAnalysisService;
