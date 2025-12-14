@@ -2835,10 +2835,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             {/* Adjustment Type Selector - Floating pills */}
             <div className="flex items-center justify-center gap-2 mb-3">
               {[
-                { key: 'brightness', icon: '☀️', label: '亮度' },
-                { key: 'contrast', icon: '◐', label: '對比' },
-                { key: 'saturation', icon: '🎨', label: '飽和' },
-                { key: 'warmth', icon: '🔥', label: '色溫' },
+                { key: 'brightness', label: '亮度' },
+                { key: 'contrast', label: '對比' },
+                { key: 'saturation', label: '飽和' },
+                { key: 'warmth', label: '色溫' },
               ].map(adj => (
                 <button
                   key={adj.key}
@@ -2849,7 +2849,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                       : 'bg-black/20 backdrop-blur-sm opacity-70 hover:opacity-100'
                   }`}
                 >
-                  <span className="text-sm">{adj.icon}</span>
+                  <span className="text-white text-xs font-medium">{adj.label}</span>
                   {activeAdjustment === adj.key && (
                     <span className="text-white text-xs font-medium">{manualAdjustments[adj.key]}</span>
                   )}

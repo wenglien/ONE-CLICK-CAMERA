@@ -13,7 +13,7 @@ const mapContainerStyle = {
 };
 
 const defaultCenter = {
-    lat: 25.0330,  // 台北預設位置
+    lat: 25.0330,  
     lng: 121.5654
 };
 
@@ -23,7 +23,7 @@ const mapOptions = {
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: false,
-    gestureHandling: 'greedy', // 允許一指滑動地圖
+    gestureHandling: 'greedy', 
     styles: [
         {
             featureType: 'poi.business',
@@ -106,8 +106,8 @@ const RestaurantCard = ({ restaurant, index, onClick, onQuickApply }) => {
 const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = false }) => {
     const { t } = useLanguage();
     const mapRef = useRef(null);
-    const lastRefreshTriggerRef = useRef(0); // 追蹤上次看到的 refreshTrigger
-    const prevIsOpenRef = useRef(false); // 追蹤上一次的 isOpen 狀態
+    const lastRefreshTriggerRef = useRef(0); 
+    const prevIsOpenRef = useRef(false); 
 
     // Google Maps API loading
     const { isLoaded, loadError } = useJsApiLoader({
@@ -149,7 +149,6 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         }
     }, [restaurants, sortBy]);
 
-    // 取得使用者位置
     const getUserLocation = useCallback(() => {
         if (!navigator.geolocation) {
             setLocationError('您的瀏覽器不支援地理位置功能');
@@ -159,7 +158,6 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         setLoading(true);
         setLocationError(null);
 
-        // Safari 需要先請求權限
         const requestLocation = () => {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
@@ -172,14 +170,12 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                     setLocationError(null);
                     setLoading(false);
 
-                    // 載入附近餐廳
                     loadNearbyRestaurants(location.lat, location.lng);
                 },
                 (error) => {
                     console.error('Geolocation error:', error);
                     setLoading(false);
 
-                    // 針對不同錯誤提供更詳細的訊息
                     switch (error.code) {
                         case error.PERMISSION_DENIED:
                             setLocationError('定位權限被拒絕。請在 Safari 設定 > 隱私權 > 定位服務中允許此網站使用定位');
@@ -195,14 +191,13 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                     }
                 },
                 {
-                    enableHighAccuracy: false, // Safari 在高精確度模式下可能會失敗
-                    timeout: 15000, // 給 Safari 更多時間
-                    maximumAge: 300000 // 5 分鐘快取
+                    enableHighAccuracy: false, 
+                    timeout: 15000,
+                    maximumAge: 300000 
                 }
             );
         };
 
-        // 檢查是否有 permissions API (Chrome, Firefox)
         if (navigator.permissions && navigator.permissions.query) {
             navigator.permissions.query({ name: 'geolocation' }).then((result) => {
                 if (result.state === 'denied') {
@@ -212,16 +207,13 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                     requestLocation();
                 }
             }).catch(() => {
-                // Safari 不支援 permissions API，直接請求
                 requestLocation();
             });
         } else {
-            // Safari 直接請求定位
             requestLocation();
         }
     }, []);
 
-    // 載入附近的餐廳
     const loadNearbyRestaurants = async (lat, lng) => {
         try {
             setLoading(true);
@@ -235,32 +227,26 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         }
     };
 
-    // 當 MapView 打開時，檢查是否需要刷新資料
     useEffect(() => {
         if (isOpen && isLoaded) {
             const justOpened = !prevIsOpenRef.current && isOpen;
             const hasNewData = refreshTrigger > lastRefreshTriggerRef.current;
             
             if (userLocation) {
-                // 如果剛打開且有新資料，或者是第一次載入，都要重新載入餐廳
                 if (justOpened || hasNewData || restaurants.length === 0) {
                     console.log('📍 MapView loading restaurants...', { justOpened, hasNewData, refreshTrigger });
                     loadNearbyRestaurants(userLocation.lat, userLocation.lng);
                 }
             } else {
-                // 如果沒有位置，才去取得位置
                 getUserLocation();
             }
             
-            // 更新追蹤的值
             lastRefreshTriggerRef.current = refreshTrigger;
         }
         
-        // 更新上一次的 isOpen 狀態
         prevIsOpenRef.current = isOpen;
     }, [isOpen, isLoaded, refreshTrigger, userLocation, restaurants.length, getUserLocation]);
 
-    // 當位置取得後載入餐廳
     useEffect(() => {
         if (isOpen && isLoaded && userLocation && restaurants.length === 0) {
             console.log('📍 Got location, loading restaurants...');
@@ -268,24 +254,20 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         }
     }, [userLocation, isOpen, isLoaded, restaurants.length]);
 
-    // 處理地圖載入
     const onMapLoad = useCallback((map) => {
         mapRef.current = map;
     }, []);
 
-    // 處理餐廳點擊
     const handleRestaurantClick = (restaurant) => {
         setSelectedRestaurant(restaurant);
     };
 
-    // 打開餐廳詳情
     const openRestaurantDetail = () => {
         if (selectedRestaurant) {
             setShowRestaurantDetail(true);
         }
     };
 
-    // 套用參數
     const handleApplyParams = (params) => {
         if (onApplyParams) {
             onApplyParams(params);
@@ -294,7 +276,6 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         onClose();
     };
 
-    // 重新整理
     const handleRefresh = () => {
         if (userLocation) {
             loadNearbyRestaurants(userLocation.lat, userLocation.lng);
@@ -303,13 +284,11 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         }
     };
 
-    // Google Places Autocomplete 搜尋
     const handleSearch = async (query) => {
         if (!query.trim() || !isLoaded) return;
 
         setLoading(true);
         try {
-            // 使用 Google Places Autocomplete Service
             const autocompleteService = new window.google.maps.places.AutocompleteService();
 
             const request = {
@@ -324,10 +303,8 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
 
             autocompleteService.getPlacePredictions(request, async (predictions, status) => {
                 if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-                    // 取得每個預測結果的詳細資訊並檢查是否有拍攝參數
                     const resultsWithParams = await Promise.all(
                         predictions.slice(0, 5).map(async (prediction) => {
-                            // 檢查 Firebase 是否有這間餐廳的資料
                             const existingRestaurant = restaurants.find(r =>
                                 r.placeId === prediction.place_id ||
                                 r.name.toLowerCase() === prediction.structured_formatting.main_text.toLowerCase()
@@ -359,13 +336,11 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         }
     };
 
-    // 選擇搜尋結果
     const selectSearchResult = async (result) => {
         setShowSearchResults(false);
         setSearchQuery(result.name);
 
         if (result.existingData) {
-            // 如果有現有資料，直接使用
             setSelectedRestaurant(result.existingData);
             const location = {
                 lat: result.existingData.location.latitude,
@@ -377,7 +352,6 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                 mapRef.current.setZoom(17);
             }
         } else {
-            // 如果沒有現有資料，使用 Places Service 獲取詳細位置
             setLoading(true);
             try {
                 const placesService = new window.google.maps.places.PlacesService(mapRef.current);
@@ -394,7 +368,6 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                                 lng: place.geometry.location.lng()
                             };
 
-                            // 檢查 Firebase 是否有這間餐廳的拍攝參數
                             let photoCount = 0;
                             try {
                                 const photos = await restaurantService.getRestaurantPhotos(result.placeId);
@@ -403,7 +376,6 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                                 console.log('No photos found for this restaurant');
                             }
 
-                            // 創建一個臨時餐廳物件來顯示
                             const tempRestaurant = {
                                 id: result.placeId,
                                 placeId: result.placeId,
@@ -433,7 +405,6 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         }
     };
 
-    // 搜尋輸入防抖
     useEffect(() => {
         const debounceTimer = setTimeout(() => {
             if (searchQuery.trim().length >= 2) {
@@ -449,10 +420,9 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
 
     if (!isOpen) return null;
 
-    // Define wrapper class based on embedded mode
     const wrapperClass = isEmbedded
-        ? "absolute inset-0 bg-gray-950" // Embedded: no fixed positioning needed
-        : "fixed inset-0 z-50 bg-gray-950"; // Modal: fixed with z-index
+        ? "absolute inset-0 bg-gray-950" 
+        : "fixed inset-0 z-50 bg-gray-950"; 
 
     return (
         <div className={wrapperClass}>
