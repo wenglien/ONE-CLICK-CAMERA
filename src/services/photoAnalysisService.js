@@ -5,17 +5,29 @@ class PhotoAnalysisService {
 
   async analyzePhoto(imageBase64, metadata = {}, language = 'zh-TW') {
     const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-    
+
     try {
-      const compressedImage = await this.compressImage(imageBase64, 600, 0.5);
+      console.log(`[${requestId}] Starting photo analysis...`);
+      console.log(`[${requestId}] Original image size: ${Math.round(imageBase64.length / 1024)}KB`);
+
+      // Optimized for Gemini AI: 1024px max width, 0.8 quality
+      const compressedImage = await this.compressImage(imageBase64, 1024, 0.8);
+      console.log(`[${requestId}] Compressed image size: ${Math.round(compressedImage.length / 1024)}KB`);
+
       const prompt = this.buildAnalysisPrompt(metadata, language);
+      console.log(`[${requestId}] Calling analysis API...`);
+
       const response = await this.callAnalysisAPI(compressedImage, prompt, requestId);
+      console.log(`[${requestId}] API response received, parsing...`);
+
       const result = this.parseAnalysisResult(response);
       result._source = 'ai';
       result._requestId = requestId;
+
+      console.log(`[${requestId}] Analysis complete, score: ${result.overallScore}`);
       return result;
     } catch (error) {
-      console.error(`Photo analysis error [${requestId}]:`, error.message);
+      console.error(`[${requestId}] Photo analysis error:`, error.message);
       const fallback = this.getDefaultSuggestions(language);
       fallback._source = 'fallback';
       fallback._error = error.message;
@@ -25,8 +37,8 @@ class PhotoAnalysisService {
   }
 
   buildAnalysisPrompt(metadata, language) {
-    const currentSettings = metadata.filters ? 
-      `目前的拍攝設定：亮度 ${metadata.filters.brightness}%，對比度 ${metadata.filters.contrast}%，飽和度 ${metadata.filters.saturate}%，色溫 ${metadata.filters.warmth > 0 ? '+' : ''}${metadata.filters.warmth}` : 
+    const currentSettings = metadata.filters ?
+      `目前的拍攝設定：亮度 ${metadata.filters.brightness}%，對比度 ${metadata.filters.contrast}%，飽和度 ${metadata.filters.saturate}%，色溫 ${metadata.filters.warmth > 0 ? '+' : ''}${metadata.filters.warmth}` :
       '';
 
     if (language === 'zh-TW') {
@@ -91,7 +103,7 @@ Respond in JSON format.`;
 
   async callAnalysisAPI(imageBase64, prompt, requestId = 'unknown') {
     const endpoint = this.proxyUrl || '/api';
-    
+
     const requestBody = {
       image: imageBase64,
       prompt: prompt,
@@ -104,7 +116,7 @@ Respond in JSON format.`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
-    
+
     let response;
     try {
       response = await fetch(endpoint, {
@@ -123,7 +135,7 @@ Respond in JSON format.`;
     }
 
     const rawText = await response.text();
-    
+
     let data;
     try {
       data = JSON.parse(rawText);
@@ -232,30 +244,80 @@ Respond in JSON format.`;
     };
   }
 
-  async compressImage(imageBase64, maxWidth = 800, quality = 0.7) {
+  async compressImage(imageBase64, maxWidth = 1024, quality = 0.8) {
     return new Promise((resolve) => {
       const img = new Image();
+      img.crossOrigin = 'anonymous';
+
       img.onload = () => {
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
 
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
+        // Calculate new dimensions while maintaining aspect ratio
+        if (width > maxWidth || height > maxWidth) {
+          if (width > height) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          } else {
+            width = (width * maxWidth) / height;
+            height = maxWidth;
+          }
         }
+
+        // Ensure dimensions are even
+        width = Math.floor(width / 2) * 2;
+        height = Math.floor(height / 2) * 2;
 
         canvas.width = width;
         canvas.height = height;
 
         const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
 
-        const compressed = canvas.toDataURL('image/jpeg', quality);
+        // Try to compress to under 1MB
+        let compressed = canvas.toDataURL('image/jpeg', quality);
+        let iterations = 0;
+        const maxIterations = 5;
+
+        // If image is too large, reduce quality iteratively
+        while (compressed.length > 1024 * 1024 && iterations < maxIterations) {
+          quality -= 0.1;
+          if (quality < 0.3) {
+            // If quality is too low, reduce dimensions instead
+            width = Math.floor(width * 0.8);
+            height = Math.floor(height * 0.8);
+            canvas.width = width;
+            canvas.height = height;
+            ctx.drawImage(img, 0, 0, width, height);
+            quality = 0.7;
+          }
+          compressed = canvas.toDataURL('image/jpeg', quality);
+          iterations++;
+        }
+
+        const originalSize = Math.round(imageBase64.length / 1024);
+        const compressedSize = Math.round(compressed.length / 1024);
+        console.log(`Image compressed: ${img.width}x${img.height} -> ${width}x${height}, ${originalSize}KB -> ${compressedSize}KB (quality: ${quality.toFixed(2)})`);
+
         resolve(compressed);
       };
-      img.onerror = () => resolve(imageBase64);
-      img.src = imageBase64;
+
+      img.onerror = (err) => {
+        console.error('Image compression failed:', err);
+        // Return original as fallback
+        resolve(imageBase64);
+      };
+
+      // Handle potential issues with the image source
+      try {
+        img.src = imageBase64;
+      } catch (e) {
+        console.error('Failed to set image src:', e);
+        resolve(imageBase64);
+      }
     });
   }
 

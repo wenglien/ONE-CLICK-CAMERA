@@ -22,7 +22,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const { image, prompt } = req.body || {};
-    
+
     if (!image) {
       return res.status(400).json({ error: 'Missing image data' });
     }
@@ -44,6 +44,18 @@ module.exports = async function handler(req, res) {
       if (mimeMatch) {
         mimeType = mimeMatch[1];
       }
+    }
+
+    // 檢查圖片大小
+    const imageSizeKB = Math.round(imageBase64.length * 0.75 / 1024);
+    console.log(`Processing image: ${imageSizeKB}KB, mime: ${mimeType}`);
+
+    // 如果圖片太大，返回錯誤
+    if (imageSizeKB > 4096) {
+      return res.status(400).json({
+        error: 'Image too large',
+        details: `Image size ${imageSizeKB}KB exceeds 4MB limit. Please compress the image.`
+      });
     }
 
     // 預設提示詞
@@ -78,9 +90,9 @@ module.exports = async function handler(req, res) {
   "encouragement": "正面鼓勵的話"
 }`;
 
-    // 調用 Gemini API
+    // 調用 Gemini API - 使用 gemini-1.5-flash 模型
     const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,12 +123,12 @@ module.exports = async function handler(req, res) {
     try {
       const errorJson = JSON.parse(errorText);
       errorDetails = errorJson.error?.message || errorText;
-    } catch (e) {}
-    
-    return res.status(500).json({ 
-      error: 'Gemini API failed', 
+    } catch (e) { }
+
+    return res.status(500).json({
+      error: 'Gemini API failed',
       status: geminiResponse.status,
-      details: errorDetails 
+      details: errorDetails
     });
 
   } catch (err) {

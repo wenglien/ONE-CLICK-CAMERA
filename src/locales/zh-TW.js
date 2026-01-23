@@ -181,7 +181,12 @@ const zhTW = {
     saving: '儲存中...',
     saved: '已儲存',
     download: '下載',
-    edited: '已編輯'
+    edited: '已編輯',
+    // Photo gallery
+    viewPhotos: '查看照片',
+    photoGallery: '我的照片',
+    noPhotos: '還沒有照片',
+    noPhotosDesc: '拍攝並儲存照片後，它們會顯示在這裡'
   },
 
   // Authentication

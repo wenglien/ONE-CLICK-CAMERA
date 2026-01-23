@@ -170,6 +170,17 @@ export const AuthProvider = ({ children }) => {
 
         try {
             const userRef = doc(db, 'users', currentUser.uid);
+
+            // If displayName is updated, also update Firebase Auth profile
+            if (updates.displayName) {
+                await updateProfile(currentUser, { displayName: updates.displayName });
+            }
+
+            // If photoURL is updated, also update Firebase Auth profile
+            if (updates.photoURL) {
+                await updateProfile(currentUser, { photoURL: updates.photoURL });
+            }
+
             await updateDoc(userRef, {
                 ...updates,
                 updatedAt: serverTimestamp(),
@@ -182,6 +193,31 @@ export const AuthProvider = ({ children }) => {
             console.error('Error updating user profile:', error);
             setError(error.message);
             return false;
+        }
+    };
+
+    // Update profile image
+    const updateProfileImage = async (imageData) => {
+        if (!currentUser) return null;
+
+        try {
+            const fileName = `profiles/${currentUser.uid}/avatar.jpg`;
+            const storageRef = ref(storage, fileName);
+
+            // Upload base64 image
+            await uploadString(storageRef, imageData, 'data_url');
+
+            // Get download URL
+            const downloadURL = await getDownloadURL(storageRef);
+
+            // Update profile with new photo URL
+            await updateUserProfile({ photoURL: downloadURL });
+
+            return downloadURL;
+        } catch (error) {
+            console.error('Error updating profile image:', error);
+            setError(error.message);
+            return null;
         }
     };
 
@@ -744,6 +780,7 @@ export const AuthProvider = ({ children }) => {
         signInWithGoogle,
         logout,
         updateUserProfile,
+        updateProfileImage,     // 更新大頭貼
         updatePreferences,
         updateLearnedAdjustments,
         updateStats,

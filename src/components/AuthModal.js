@@ -58,25 +58,26 @@ const AuthModal = ({ isOpen, onClose }) => {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-            <div className="relative w-full max-w-md bg-gradient-to-b from-gray-900 to-gray-950 rounded-3xl overflow-hidden shadow-2xl border border-white/10 animate-scaleIn">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-md animate-fadeIn">
+            <div className="relative w-full max-w-md liquid-glass-dark overflow-hidden shadow-2xl border border-white/10 animate-scaleIn flex flex-col">
                 {/* Header */}
-                <div className="relative p-6 text-center">
+                <div className="relative p-8 text-center">
                     <button
                         onClick={onClose}
-                        className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                        className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-2xl liquid-glass border-white/10 hover:bg-white/20 transition-all z-20"
+                        aria-label={t('auth.close') || 'Close'}
                     >
-                        <X className="w-5 h-5 text-white" />
+                        <X className="w-4 h-4 text-white" />
                     </button>
 
-                    <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl flex items-center justify-center">
-                        <Camera className="w-8 h-8 text-white" />
+                    <div className="w-16 h-16 mx-auto mb-6 liquid-glass flex items-center justify-center border-white/10">
+                        <Camera className="w-8 h-8 text-green-400" />
                     </div>
 
-                    <h2 className="text-2xl font-bold text-white mb-2">
+                    <h2 className="text-3xl font-extrabold text-white mb-2 tracking-tight">
                         {isLogin ? t('auth.welcomeBack') : t('auth.createAccount')}
                     </h2>
-                    <p className="text-gray-400 text-sm">
+                    <p className="text-gray-400 font-medium">
                         {isLogin ? t('auth.loginDesc') : t('auth.signupDesc')}
                     </p>
                 </div>
@@ -92,8 +93,10 @@ const AuthModal = ({ isOpen, onClose }) => {
                                 value={displayName}
                                 onChange={(e) => setDisplayName(e.target.value)}
                                 placeholder={t('auth.displayName')}
-                                className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition-all"
+                                className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/30 transition-all font-medium"
                                 required={!isLogin}
+                                aria-label={t('auth.displayName') || 'Display Name'}
+                                autoComplete="name"
                             />
                         </div>
                     )}
@@ -106,8 +109,10 @@ const AuthModal = ({ isOpen, onClose }) => {
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             placeholder={t('auth.email')}
-                            className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition-all"
+                            className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/30 transition-all font-medium"
                             required
+                            aria-label={t('auth.email') || 'Email'}
+                            autoComplete="email"
                         />
                     </div>
 
@@ -119,14 +124,17 @@ const AuthModal = ({ isOpen, onClose }) => {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             placeholder={t('auth.password')}
-                            className="w-full pl-12 pr-12 py-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition-all"
+                            className="w-full pl-12 pr-12 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/30 transition-all font-medium"
                             required
                             minLength={6}
+                            aria-label={t('auth.password') || 'Password'}
+                            autoComplete={isLogin ? 'current-password' : 'new-password'}
                         />
                         <button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
                             className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                            aria-label={showPassword ? (t('auth.hidePassword') || 'Hide password') : (t('auth.showPassword') || 'Show password')}
                         >
                             {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                         </button>
@@ -134,8 +142,8 @@ const AuthModal = ({ isOpen, onClose }) => {
 
                     {/* Error message */}
                     {error && (
-                        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
-                            <p className="text-red-400 text-sm text-center">{error}</p>
+                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                            <p className="text-red-400 text-sm text-center font-medium">{error}</p>
                         </div>
                     )}
 
@@ -143,11 +151,11 @@ const AuthModal = ({ isOpen, onClose }) => {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 rounded-xl text-white font-bold text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        className="btn-liquid w-full py-4 text-lg flex items-center justify-center gap-2"
                     >
                         {loading ? (
                             <>
-                                <Loader2 className="w-5 h-5 animate-spin" />
+                                <Loader2 className="w-6 h-6 animate-spin" />
                                 {t('auth.loading')}
                             </>
                         ) : (
@@ -156,9 +164,9 @@ const AuthModal = ({ isOpen, onClose }) => {
                     </button>
 
                     {/* Divider */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 py-2">
                         <div className="flex-1 h-px bg-white/10" />
-                        <span className="text-gray-500 text-sm">{t('auth.or')}</span>
+                        <span className="text-gray-500 text-xs font-bold uppercase tracking-widest">{t('auth.or')}</span>
                         <div className="flex-1 h-px bg-white/10" />
                     </div>
 
@@ -167,9 +175,9 @@ const AuthModal = ({ isOpen, onClose }) => {
                         type="button"
                         onClick={handleGoogleSignIn}
                         disabled={loading}
-                        className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+                        className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-white font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
                     >
-                        <svg className="w-5 h-5" viewBox="0 0 24 24">
+                        <svg className="w-6 h-6" viewBox="0 0 24 24">
                             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
                             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />

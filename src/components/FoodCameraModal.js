@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Camera, RotateCcw, Loader2, SwitchCamera, Download, Cpu, Target, Sparkles, ZoomIn, ZoomOut, Palette, Brain, Zap, Maximize2, Minimize2, Sliders, Heart, Move, User, Settings, CheckCircle, Grid3X3, ChevronUp, ChevronDown, ChevronRight, ChevronLeft, MapPin, Share2, Wand2, TrendingUp, TrendingDown, Minus, MessageCircle, RefreshCw, ArrowLeft } from 'lucide-react';
+import { X, Camera, RotateCcw, Loader2, SwitchCamera, Download, Cpu, Target, Sparkles, ZoomIn, ZoomOut, Palette, Brain, Zap, Maximize2, Minimize2, Sliders, Heart, Move, User, Settings, CheckCircle, Grid3X3, ChevronUp, ChevronDown, ChevronRight, ChevronLeft, MapPin, Share2, Wand2, TrendingUp, TrendingDown, Minus, MessageCircle, RefreshCw, ArrowLeft, Image } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import * as tf from '@tensorflow/tfjs';
@@ -8,6 +8,7 @@ import preferenceService from '../services/preferenceService';
 import userProfileService from '../services/userProfileService';
 import restaurantService from '../services/restaurantService';
 import photoAnalysisService from '../services/photoAnalysisService';
+import { batchProcessStyles, cleanupBlobUrls, STYLE_PRESETS } from '../services/imageStyleProcessor';
 import RestaurantPicker from './RestaurantPicker';
 
 const FOOD_CLASSES = [
@@ -18,7 +19,7 @@ const FOOD_CLASSES = [
 
 const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPhotoShared, isEmbedded = false }) => {
   const { t, currentLanguage } = useLanguage();
-  const { currentUser, userProfile, updateUserProfile, incrementPhotoCount, recordPhotoLearning, savePhotoToProfile } = useAuth();
+  const { currentUser, userProfile, updateUserProfile, incrementPhotoCount, recordPhotoLearning, savePhotoToProfile, getUserPhotos } = useAuth();
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const previewCanvasRef = useRef(null);
@@ -83,13 +84,29 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
   const [capturedFilterStr, setCapturedFilterStr] = useState(null);
 
   const [stabilizationEnabled, setStabilizationEnabled] = useState(true);
+  const [motionLevel, setMotionLevel] = useState(0); // 0-100, 0 = stable
+  const [isStable, setIsStable] = useState(true); // Default to true to allow capture
   const stabilizationRef = useRef({
     offsetX: 0,
     offsetY: 0,
     smoothX: 0,
     smoothY: 0,
     prevOffsetX: 0,
-    prevOffsetY: 0
+    prevOffsetY: 0,
+    velocityX: 0,
+    velocityY: 0,
+    prevFrame: null,
+    motionHistory: [],
+    kalmanX: { value: 0, error: 1, processNoise: 0.01, measurementNoise: 0.25 },
+    kalmanY: { value: 0, error: 1, processNoise: 0.01, measurementNoise: 0.25 }
+  });
+
+  // 陀螺儀和加速度計支持
+  const motionSensorRef = useRef({
+    orientation: null,
+    acceleration: null,
+    hasPermission: false,
+    isSupported: false
   });
 
   const [isPhotoLiked, setIsPhotoLiked] = useState(false);
@@ -118,21 +135,43 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
   const [showAdjustmentsPopup, setShowAdjustmentsPopup] = useState(false);
   const [activeAdjustment, setActiveAdjustment] = useState('brightness');
 
+  // Liquid Glass Styles for Camera UI
+  const glassPanelClass = "liquid-glass-dark p-4 border-white/10";
+  const glassButtonClass = "w-11 h-11 flex items-center justify-center rounded-2xl liquid-glass border-white/10 transition-all duration-300 hover:scale-110 active:scale-95";
+  const glassPillClass = "px-3 py-1.5 rounded-full liquid-glass border-white/10 flex items-center gap-2 transition-all duration-300";
+
+  // Photo gallery states
+  const [showPhotoGallery, setShowPhotoGallery] = useState(false);
+  const [userPhotos, setUserPhotos] = useState([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [selectedGalleryPhoto, setSelectedGalleryPhoto] = useState(null);
+
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [showAnalysisPanel, setShowAnalysisPanel] = useState(false);
+
+  const [resolution, setResolution] = useState('1080p'); // '1080p' or '4k'
+
 
   useEffect(() => {
     showGridRef.current = showGrid;
   }, [showGrid]);
 
+  // 當用戶登入後，自動載入照片列表
+  useEffect(() => {
+    if (currentUser && getUserPhotos) {
+      console.log('👤 User logged in, loading photos...');
+      loadUserPhotos();
+    }
+  }, [currentUser]);
+
   useEffect(() => {
     if (capturedImage && !analysisResult && !isAnalyzing) {
       const imageToAnalyze = capturedImage;
-      
+
       const runAnalysis = async () => {
         setIsAnalyzing(true);
-        
+
         try {
           const metadata = {
             filters: stateRef.current?.filters ? { ...stateRef.current.filters } : null,
@@ -158,7 +197,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           setIsAnalyzing(false);
         }
       };
-      
+
       const timer = setTimeout(runAnalysis, 300);
       return () => clearTimeout(timer);
     }
@@ -237,12 +276,23 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       const devices = await navigator.mediaDevices.enumerateDevices();
       setHasMultipleCameras(devices.filter(d => d.kind === 'videoinput').length > 1);
 
+      // 根據用戶選擇的解析度設定不同的 constraints
+      const videoConstraints = resolution === '4k' ? {
+        facingMode,
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+        aspectRatio: { ideal: 16 / 9 },
+        frameRate: { ideal: 30 }
+      } : {
+        facingMode,
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        aspectRatio: { ideal: 16 / 9 },
+        frameRate: { ideal: 30 }
+      };
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode,
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
+        video: videoConstraints,
         audio: false
       });
 
@@ -322,7 +372,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       setError(t('camera.cameraError'));
       setCameraReady(false);
     }
-  }, [facingMode, t]); // Removed selectedMode to prevent camera re-initialization on mode change
+  }, [facingMode, resolution, t]); // Added resolution to trigger re-initialization when changed
 
   const handleZoomChange = async (newZoom) => {
     if (!trackRef.current || !supportsZoom) return;
@@ -829,14 +879,90 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         let drawHeight = vh;
 
         if (stabilizationEnabled) {
-          const stabilizationMargin = 0.05; // 5% on each side
+          const stabilizationMargin = 0.08; // 8% on each side for better stabilization
           const cropMargin = Math.min(vw, vh) * stabilizationMargin;
 
-          const smoothingFactor = 0.7; // Higher = more smoothing, less responsive
           const stab = stabilizationRef.current;
 
-          stab.smoothX = stab.smoothX * smoothingFactor + stab.offsetX * (1 - smoothingFactor);
-          stab.smoothY = stab.smoothY * smoothingFactor + stab.offsetY * (1 - smoothingFactor);
+          // 運動檢測 - 使用影像差異
+          let motionDetected = 0;
+          if (stab.prevFrame) {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = Math.min(320, vw);
+            tempCanvas.height = Math.min(240, vh);
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+            const currentImageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+
+            let diff = 0;
+            for (let i = 0; i < currentImageData.data.length; i += 4) {
+              const r = Math.abs(currentImageData.data[i] - stab.prevFrame.data[i]);
+              const g = Math.abs(currentImageData.data[i + 1] - stab.prevFrame.data[i + 1]);
+              const b = Math.abs(currentImageData.data[i + 2] - stab.prevFrame.data[i + 2]);
+              diff += (r + g + b) / 3;
+            }
+            motionDetected = Math.min(100, (diff / (currentImageData.data.length / 4)) * 0.1);
+
+            // 更新運動歷史
+            if (!stab.motionHistory) stab.motionHistory = [];
+            stab.motionHistory.push(motionDetected);
+            if (stab.motionHistory.length > 10) {
+              stab.motionHistory.shift();
+            }
+
+            // 計算平均運動
+            const avgMotion = stab.motionHistory.reduce((a, b) => a + b, 0) / stab.motionHistory.length;
+            setMotionLevel(avgMotion);
+            setIsStable(avgMotion < 15); // 運動小於15%視為穩定（放寬條件）
+
+            stab.prevFrame = currentImageData;
+          } else {
+            // 初始化第一幀
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = Math.min(320, vw);
+            tempCanvas.height = Math.min(240, vh);
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+            stab.prevFrame = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            setIsStable(true); // 初始化時允許拍攝
+          }
+
+          // 卡爾曼濾波器用於平滑運動
+          const kalmanUpdate = (kalman, measurement) => {
+            if (!kalman) {
+              kalman = { value: 0, error: 1, processNoise: 0.01, measurementNoise: 0.25 };
+            }
+            // 預測
+            kalman.error = kalman.error + kalman.processNoise;
+
+            // 更新
+            const gain = kalman.error / (kalman.error + kalman.measurementNoise);
+            kalman.value = kalman.value + gain * (measurement - kalman.value);
+            kalman.error = (1 - gain) * kalman.error;
+
+            return kalman.value;
+          };
+
+          // 初始化卡爾曼濾波器
+          if (!stab.kalmanX) stab.kalmanX = { value: 0, error: 1, processNoise: 0.01, measurementNoise: 0.25 };
+          if (!stab.kalmanY) stab.kalmanY = { value: 0, error: 1, processNoise: 0.01, measurementNoise: 0.25 };
+
+          // 計算運動補償（基於運動檢測）
+          const motionCompensation = motionDetected * 0.5; // 運動越大，補償越大
+
+          // 使用卡爾曼濾波器平滑偏移
+          stab.offsetX = kalmanUpdate(stab.kalmanX, (stab.offsetX || 0) + motionCompensation);
+          stab.offsetY = kalmanUpdate(stab.kalmanY, (stab.offsetY || 0) + motionCompensation);
+
+          // 自適應平滑因子 - 運動大時更平滑
+          const adaptiveSmoothing = Math.max(0.5, Math.min(0.9, 0.7 + motionDetected * 0.002));
+
+          stab.smoothX = (stab.smoothX || 0) * adaptiveSmoothing + stab.offsetX * (1 - adaptiveSmoothing);
+          stab.smoothY = (stab.smoothY || 0) * adaptiveSmoothing + stab.offsetY * (1 - adaptiveSmoothing);
+
+          // 限制在邊界內
+          stab.smoothX = Math.max(-cropMargin, Math.min(cropMargin, stab.smoothX));
+          stab.smoothY = Math.max(-cropMargin, Math.min(cropMargin, stab.smoothY));
 
           drawX = -cropMargin + stab.smoothX;
           drawY = -cropMargin + stab.smoothY;
@@ -1028,7 +1154,31 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   }, [selectedMode, cameraReady, multiCaptureMode, capturedImage, triggerImmediateAnalysis]);
 
-  const capturePhotoWithMode = (modeId = selectedMode, returnRaw = false) => {
+  // Sync manual adjustments to capturedImages for multi-capture mode
+  useEffect(() => {
+    if (Object.keys(capturedImages).length > 0 && selectedMode) {
+      setCapturedImages(prev => {
+        const photo = prev[selectedMode];
+        if (!photo) return prev;
+
+        const currentAdj = photo.userAdjustments;
+        if (JSON.stringify(currentAdj) === JSON.stringify(manualAdjustments)) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [selectedMode]: {
+            ...photo,
+            userAdjustments: { ...manualAdjustments }
+          }
+        };
+      });
+    }
+  }, [manualAdjustments, selectedMode]);
+
+
+  const capturePhotoWithMode = (modeId = selectedMode, returnRaw = false, stableCanvas = null) => {
     const video = videoRef.current;
     if (!video) return null;
 
@@ -1065,22 +1215,40 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', {
+      alpha: false,
+      desynchronized: true,
+      willReadFrequently: false
+    });
+
+    // 設置高質量圖像渲染
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     let rawData = null;
     if (returnRaw) {
-      ctx.drawImage(video, 0, 0, width, height);
-      rawData = canvas.toDataURL('image/jpeg', 1.0);
+      // 使用穩定後的畫布（如果有的話）
+      if (stableCanvas) {
+        ctx.drawImage(stableCanvas, 0, 0, width, height);
+      } else {
+        ctx.drawImage(video, 0, 0, width, height);
+      }
+      rawData = canvas.toDataURL('image/jpeg', 0.98);
       ctx.clearRect(0, 0, width, height);
     }
 
     ctx.filter = filterStr;
-    ctx.drawImage(video, 0, 0, width, height);
+    // 使用穩定後的畫布（如果有的話）
+    if (stableCanvas) {
+      ctx.drawImage(stableCanvas, 0, 0, width, height);
+    } else {
+      ctx.drawImage(video, 0, 0, width, height);
+    }
     ctx.filter = 'none';
 
     console.log('📸 Photo captured with filters applied');
 
-    const imageData = canvas.toDataURL('image/jpeg', 1.0);
+    const imageData = canvas.toDataURL('image/jpeg', 0.98);
 
     if (returnRaw) {
       return { raw: rawData, baked: imageData, filterStr };
@@ -1088,7 +1256,118 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     return imageData;
   };
 
-  const capturePhoto = () => {
+  // 高質量單幀拍照 - 避免多幀合成導致的模糊
+  // 計算圖像銳度（Laplacian variance - 業界標準方法）
+  const calculateSharpness = (imageData) => {
+    const data = imageData.data;
+    const width = imageData.width;
+    const height = imageData.height;
+
+    // 轉換為灰階並計算 Laplacian
+    let laplacianSum = 0;
+    let laplacianSqSum = 0;
+    let count = 0;
+
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = (y * width + x) * 4;
+
+        // 轉灰階 (使用標準亮度公式)
+        const center = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+
+        // 取得周圍8個像素的灰階值
+        const top = 0.299 * data[((y - 1) * width + x) * 4] + 0.587 * data[((y - 1) * width + x) * 4 + 1] + 0.114 * data[((y - 1) * width + x) * 4 + 2];
+        const bottom = 0.299 * data[((y + 1) * width + x) * 4] + 0.587 * data[((y + 1) * width + x) * 4 + 1] + 0.114 * data[((y + 1) * width + x) * 4 + 2];
+        const left = 0.299 * data[(y * width + (x - 1)) * 4] + 0.587 * data[(y * width + (x - 1)) * 4 + 1] + 0.114 * data[(y * width + (x - 1)) * 4 + 2];
+        const right = 0.299 * data[(y * width + (x + 1)) * 4] + 0.587 * data[(y * width + (x + 1)) * 4 + 1] + 0.114 * data[(y * width + (x + 1)) * 4 + 2];
+
+        // Laplacian operator (簡化版 - 4方向)
+        const laplacian = Math.abs(4 * center - top - bottom - left - right);
+
+        laplacianSum += laplacian;
+        laplacianSqSum += laplacian * laplacian;
+        count++;
+      }
+    }
+
+    // 計算 variance (變異數越大 = 越銳利)
+    const mean = laplacianSum / count;
+    const variance = (laplacianSqSum / count) - (mean * mean);
+
+    return variance;
+  };
+
+  const captureStablePhoto = async () => {
+    if (!videoRef.current || !cameraReady) return null;
+
+    const video = videoRef.current;
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+
+    console.log('📸 開始連拍 5 張，選最清楚的...');
+
+    // 延遲 300ms 讓畫面穩定
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    const frames = [];
+    const burstCount = 5;
+    const intervalMs = 60 + Math.random() * 40; // 60-100ms 隨機間隔
+
+    // 連拍 5 張
+    for (let i = 0; i < burstCount; i++) {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      // 使用 willReadFrequently: true 確保可以讀取像素數據
+      const ctx = canvas.getContext('2d', {
+        willReadFrequently: true
+      });
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      // 捕獲當前幀
+      ctx.drawImage(video, 0, 0, width, height);
+
+      // 取得圖像數據並計算銳度
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const sharpness = calculateSharpness(imageData);
+
+      frames.push({
+        canvas,
+        sharpness,
+        index: i
+      });
+
+      console.log(`📸 第 ${i + 1} 張: 銳度值 = ${sharpness.toFixed(2)}`);
+
+      // 等待下一張 (最後一張不用等)
+      if (i < burstCount - 1) {
+        await new Promise(resolve => setTimeout(resolve, intervalMs));
+      }
+    }
+
+    // 找出最清楚的那張
+    let bestFrame = frames[0];
+    for (let i = 1; i < frames.length; i++) {
+      if (frames[i].sharpness > bestFrame.sharpness) {
+        bestFrame = frames[i];
+      }
+    }
+
+    console.log(`✅ 選擇第 ${bestFrame.index + 1} 張 (銳度: ${bestFrame.sharpness.toFixed(2)})`);
+
+    // 清理其他 canvas
+    frames.forEach(frame => {
+      if (frame !== bestFrame) {
+        frame.canvas.remove();
+      }
+    });
+
+    return bestFrame.canvas;
+  };
+
+  const capturePhoto = async () => {
     if (detectIntervalRef.current) {
       clearInterval(detectIntervalRef.current);
       detectIntervalRef.current = null;
@@ -1098,7 +1377,17 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       animationRef.current = null;
     }
 
-    const result = capturePhotoWithMode(selectedMode, true);
+    // 使用增強的多幀合成拍照
+    let stableCanvas = null;
+    if (stabilizationEnabled) {
+      try {
+        stableCanvas = await captureStablePhoto();
+      } catch (err) {
+        console.warn('多幀合成失敗，使用單幀:', err);
+      }
+    }
+
+    const result = capturePhotoWithMode(selectedMode, true, stableCanvas);
     if (!result) return;
 
     const { raw, baked, filterStr } = result;
@@ -1201,175 +1490,83 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       }
 
       setMultiCaptureMode(true);
-      const video = videoRef.current;
+      setCaptureProgress({ current: 0, total: 6 }); // 1 for capture + 5 for styles
+      console.log('📸 Starting AI Style Capture');
 
+      // Step 1: 直接從 video 捕獲照片（暫時停用連拍以確保穩定）
+      setCaptureProgress({ current: 1, total: 6 });
+
+      const video = videoRef.current;
       if (!video || video.readyState < 2) {
         throw new Error('Video not ready');
       }
 
-      setCaptureProgress({ current: 0, total: 5 });
-      console.log('📸 Starting AI Smart Capture');
-
-      const baseCanvas = document.createElement('canvas');
-      const baseCtx = baseCanvas.getContext('2d');
       const width = video.videoWidth;
       const height = video.videoHeight;
+      console.log('📹 Video dimensions:', width, 'x', height);
 
       if (!width || !height || width === 0 || height === 0) {
         throw new Error(`Invalid video dimensions (${width}x${height})`);
       }
 
+      // 創建 canvas 並繪製
+      const baseCanvas = document.createElement('canvas');
       baseCanvas.width = width;
       baseCanvas.height = height;
-      baseCtx.drawImage(video, 0, 0, width, height);
+      const ctx = baseCanvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, width, height);
+      console.log('📸 Drew video to canvas');
 
-      const currentFilters = { ...stateRef.current.filters };
-      const manualAdj = manualAdjustments;
+      // 驗證 canvas 有內容
+      const testData = ctx.getImageData(Math.floor(width / 2), Math.floor(height / 2), 1, 1).data;
+      console.log('🔍 Center pixel:', testData[0], testData[1], testData[2]);
 
-      const aiBase = {
-        brightness: currentFilters.brightness - manualAdj.brightness,
-        contrast: currentFilters.contrast - manualAdj.contrast,
-        saturate: currentFilters.saturate - manualAdj.saturation,
-        warmth: currentFilters.warmth - manualAdj.warmth
-      };
+      // 保存原始照片
+      const rawBaseImageUrl = baseCanvas.toDataURL('image/jpeg', 0.95);
+      console.log('💾 DataURL length:', rawBaseImageUrl.length);
+      setRawBaseImage(rawBaseImageUrl);
 
-      const variations = [
-        {
-          id: 'natural',
-          name: '原色',
-          nameEn: 'Natural',
-          adjustments: { brightness: 0, contrast: 0, saturate: 0, warmth: 0 }
-        },
-        {
-          id: 'vibrant',
-          name: '鮮豔',
-          nameEn: 'Vibrant',
-          adjustments: { brightness: 5, contrast: 10, saturate: 25, warmth: 15 }
-        },
-        {
-          id: 'cool',
-          name: '冷色調',
-          nameEn: 'Cool',
-          adjustments: { brightness: 0, contrast: 5, saturate: -5, warmth: -20 }
-        },
-        {
-          id: 'soft',
-          name: '柔和',
-          nameEn: 'Soft',
-          adjustments: { brightness: 10, contrast: -15, saturate: -10, warmth: 5 }
-        },
-        {
-          id: 'dramatic',
-          name: '戲劇性',
-          nameEn: 'Dramatic',
-          adjustments: { brightness: -5, contrast: 25, saturate: 15, warmth: 10 }
+
+      // Step 2: 生成 5 種風格
+      console.log('🎨 Generating 5 professional styles...');
+
+      // 使用批次處理生成風格（自動使用 RAF 優化）
+      const styleResults = await batchProcessStyles(
+        baseCanvas,
+        STYLE_PRESETS,
+        resolution === '4k' ? 1920 : 960, // 4K模式下使用1920px，1080p使用960px
+        (progress, styleName) => {
+          setCaptureProgress({
+            current: 1 + Math.floor(progress / 20), // 0-100% maps to steps 1-6
+            total: 6,
+            currentStyle: styleName
+          });
+          console.log(`⏳ Processing ${styleName}: ${progress.toFixed(0)}%`);
         }
-      ];
+      );
 
+      // Step 3: 轉換結果為組件使用的格式
       const captured = {};
+      styleResults.forEach(result => {
+        captured[result.style.id] = {
+          image: result.url, // 使用 blob URL
+          blob: result.blob,
+          canvas: result.canvas,
+          rawImageData: rawBaseImageUrl,
+          baseFilters: { ...result.style }, // 保存完整風格參數
+          userAdjustments: { brightness: 0, contrast: 0, saturation: 0, warmth: 0 },
+          name: result.style.name,
+          nameEn: result.style.nameEn
+        };
+      });
 
-      for (let i = 0; i < variations.length; i++) {
-        setCaptureProgress({ current: i + 1, total: 5 });
-        const variation = variations[i];
-
-        try {
-          const filters = {
-            brightness: aiBase.brightness + variation.adjustments.brightness,
-            contrast: aiBase.contrast + variation.adjustments.contrast,
-            saturate: aiBase.saturate + variation.adjustments.saturate,
-            warmth: aiBase.warmth + variation.adjustments.warmth
-          };
-
-          filters.brightness = Math.max(50, Math.min(150, filters.brightness));
-          filters.contrast = Math.max(50, Math.min(150, filters.contrast));
-          filters.saturate = Math.max(50, Math.min(200, filters.saturate));
-          filters.warmth = Math.max(-50, Math.min(50, filters.warmth));
-
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          canvas.width = width;
-          canvas.height = height;
-
-          let filterStr = `brightness(${filters.brightness}%) contrast(${filters.contrast}%) saturate(${filters.saturate}%)`;
-          if (filters.warmth > 0) {
-            filterStr += ` sepia(${filters.warmth * 0.4}%)`;
-          } else if (filters.warmth < 0) {
-            filterStr += ` hue-rotate(${filters.warmth * 0.6}deg)`;
-          }
-
-          console.log(`🎨 Generating ${variation.nameEn} with filters:`, filters);
-
-          ctx.drawImage(baseCanvas, 0, 0);
-
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imageData.data;
-
-          const brightnessMult = filters.brightness / 100;
-          const contrastMult = filters.contrast / 100;
-          const saturateMult = filters.saturate / 100;
-
-          for (let px = 0; px < data.length; px += 4) {
-            let r = data[px];
-            let g = data[px + 1];
-            let b = data[px + 2];
-
-            r *= brightnessMult;
-            g *= brightnessMult;
-            b *= brightnessMult;
-
-            r = ((r / 255 - 0.5) * contrastMult + 0.5) * 255;
-            g = ((g / 255 - 0.5) * contrastMult + 0.5) * 255;
-            b = ((b / 255 - 0.5) * contrastMult + 0.5) * 255;
-
-            const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
-            r = gray + (r - gray) * saturateMult;
-            g = gray + (g - gray) * saturateMult;
-            b = gray + (b - gray) * saturateMult;
-
-            if (filters.warmth > 0) {
-              r += filters.warmth * 0.8;
-              g += filters.warmth * 0.4;
-            } else if (filters.warmth < 0) {
-              b -= filters.warmth * 0.8;
-              g -= filters.warmth * 0.4;
-            }
-
-            data[px] = Math.max(0, Math.min(255, r));
-            data[px + 1] = Math.max(0, Math.min(255, g));
-            data[px + 2] = Math.max(0, Math.min(255, b));
-          }
-
-          ctx.putImageData(imageData, 0, 0);
-
-          const finalImageData = canvas.toDataURL('image/jpeg', 0.95);
-
-          if (finalImageData && finalImageData.length > 100 && finalImageData.startsWith('data:image')) {
-            captured[variation.id] = {
-              image: finalImageData,
-              rawImageData: baseCanvas.toDataURL('image/jpeg', 1.0), // Store raw base image for re-editing
-              baseFilters: { ...filters }, // Store the preset filters
-              userAdjustments: { brightness: 0, contrast: 0, saturation: 0, warmth: 0 }, // User can adjust these
-              name: variation.name,
-              nameEn: variation.nameEn
-            };
-            console.log(`✅ Generated ${variation.nameEn} variation`);
-          } else {
-            console.warn(`Invalid image data for ${variation.id}`);
-          }
-        } catch (error) {
-          console.error(`❌ Error generating ${variation.id}:`, error);
-        }
-      }
-
-      setCaptureProgress({ current: 5, total: 5 });
-      console.log(`📸 AI Smart Capture complete. Generated ${Object.keys(captured).length} variations`);
-
-      setRawBaseImage(baseCanvas.toDataURL('image/jpeg', 1.0));
+      console.log(`✅ Generated ${styleResults.length} professional styles`);
 
       setCapturedImages(captured);
       setMultiCaptureMode(false);
-      setCaptureProgress({ current: 0, total: 0 });
+      setCaptureProgress({ current: 6, total: 6 });
 
+      // 清理資源
       stateRef.current.marker = null;
       stateRef.current.detectedObject = null;
       setMarkerPosition(null);
@@ -1386,6 +1583,11 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       }
 
       setCameraReady(false);
+
+      // 註冊清理函數（在組件卸載或重新捕獲時清理 blob URLs）
+      return () => {
+        cleanupBlobUrls(styleResults);
+      };
 
     } catch (error) {
       console.error('Error in captureAIVariations:', error);
@@ -1405,16 +1607,91 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   };
 
+  const processImageWithAdjustments = (imageUrl, adjustments) => {
+    return new Promise((resolve, reject) => {
+      if (!adjustments) {
+        resolve(imageUrl);
+        return;
+      }
+
+      const hasAdjustments = adjustments.brightness !== 0 ||
+        adjustments.contrast !== 0 ||
+        adjustments.saturation !== 0 ||
+        adjustments.warmth !== 0;
+
+      if (!hasAdjustments) {
+        resolve(imageUrl);
+        return;
+      }
+
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        ctx.drawImage(img, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+
+        const brightnessMult = (100 + adjustments.brightness) / 100;
+        const contrastMult = (100 + adjustments.contrast) / 100;
+        const saturateMult = (100 + adjustments.saturation) / 100;
+        const warmth = adjustments.warmth;
+
+        for (let i = 0; i < data.length; i += 4) {
+          let r = data[i];
+          let g = data[i + 1];
+          let b = data[i + 2];
+
+          r *= brightnessMult;
+          g *= brightnessMult;
+          b *= brightnessMult;
+
+          r = ((r / 255 - 0.5) * contrastMult + 0.5) * 255;
+          g = ((g / 255 - 0.5) * contrastMult + 0.5) * 255;
+          b = ((b / 255 - 0.5) * contrastMult + 0.5) * 255;
+
+          const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
+          r = gray + (r - gray) * saturateMult;
+          g = gray + (g - gray) * saturateMult;
+          b = gray + (b - gray) * saturateMult;
+
+          if (warmth > 0) {
+            r += warmth * 0.8;
+            g += warmth * 0.4;
+          } else if (warmth < 0) {
+            b -= warmth * 0.8;
+            g -= warmth * 0.4;
+          }
+
+          data[i] = Math.max(0, Math.min(255, r));
+          data[i + 1] = Math.max(0, Math.min(255, g));
+          data[i + 2] = Math.max(0, Math.min(255, b));
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL('image/jpeg', 0.95));
+      };
+      img.onerror = reject;
+      img.src = imageUrl;
+    });
+  };
+
+
   const downloadPhoto = (e) => {
     e?.preventDefault();
     e?.stopPropagation();
     if (!capturedImage) return;
 
     try {
-      const hasAdjustments = manualAdjustments.brightness !== 0 || 
-                             manualAdjustments.contrast !== 0 || 
-                             manualAdjustments.saturation !== 0 || 
-                             manualAdjustments.warmth !== 0;
+      const hasAdjustments = manualAdjustments.brightness !== 0 ||
+        manualAdjustments.contrast !== 0 ||
+        manualAdjustments.saturation !== 0 ||
+        manualAdjustments.warmth !== 0;
 
       if (!hasAdjustments) {
         const link = document.createElement('a');
@@ -1516,10 +1793,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
 
-        const hasAdjustments = manualAdjustments.brightness !== 0 || 
-                               manualAdjustments.contrast !== 0 || 
-                               manualAdjustments.saturation !== 0 || 
-                               manualAdjustments.warmth !== 0;
+        const hasAdjustments = manualAdjustments.brightness !== 0 ||
+          manualAdjustments.contrast !== 0 ||
+          manualAdjustments.saturation !== 0 ||
+          manualAdjustments.warmth !== 0;
 
         if (hasAdjustments) {
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -1686,11 +1963,15 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         zoom: stateRef.current?.zoom || 1,
         isLiked: isPhotoLiked,
         photoInfo: photoInfo,
+        restaurantId: selectedRestaurant?.id || null,
+        restaurantName: selectedRestaurant?.name || null,
       });
 
       if (result) {
         setPhotoSaved(true);
         console.log('✅ Photo saved to profile:', result.id);
+        // 保存照片後自動刷新照片列表，這樣按鈕才能顯示最新照片
+        loadUserPhotos();
       }
     } catch (error) {
       console.error('❌ Failed to save photo:', error);
@@ -1735,6 +2016,36 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
   };
 
+  const loadUserPhotos = async () => {
+    if (!currentUser || !getUserPhotos) {
+      console.log('⚠️ Cannot load photos: no user or getUserPhotos function');
+      return;
+    }
+
+    setLoadingPhotos(true);
+    try {
+      const photos = await getUserPhotos(50);
+      setUserPhotos(photos || []); // 確保總是設置為數組
+      console.log('✅ Loaded photos:', photos?.length || 0);
+    } catch (error) {
+      console.error('❌ Failed to load photos:', error);
+      setUserPhotos([]); // 錯誤時設置為空數組
+    } finally {
+      setLoadingPhotos(false);
+    }
+  };
+
+  const handleOpenPhotoGallery = () => {
+    console.log('📷 Opening photo gallery...', { currentUser: !!currentUser, userPhotosCount: userPhotos?.length || 0 });
+    if (!currentUser) {
+      // 如果未登入，可以顯示提示或直接返回
+      console.log('⚠️ Please login to view photos');
+      return;
+    }
+    setShowPhotoGallery(true);
+    loadUserPhotos(); // 每次都重新載入以獲取最新照片
+  };
+
   const analyzePhoto = async () => {
     if (!capturedImage) {
       console.log('⚠️ No captured image to analyze');
@@ -1747,7 +2058,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
     try {
       console.log('🔍 Starting AI photo analysis...');
-      
+
       const metadata = {
         filters: stateRef.current?.filters ? { ...stateRef.current.filters } : null,
         manualAdjustments: manualAdjustments ? { ...manualAdjustments } : null,
@@ -1782,7 +2093,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     try {
       const imageId = capturedImage.substring(0, 80);
       console.log('🤖 Auto AI analysis started for image:', imageId);
-      
+
       const metadata = {
         filters: stateRef.current?.filters ? { ...stateRef.current.filters } : null,
         manualAdjustments: manualAdjustments ? { ...manualAdjustments } : null,
@@ -1797,7 +2108,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       );
 
       setAnalysisResult(result);
-      
+
       if (result._source === 'ai') {
         console.log('✅ Auto AI analysis completed for image:', imageId);
         console.log('✅ Result from: AI Vision API');
@@ -1823,7 +2134,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     if (!analysisResult?.colorFeedback) return;
 
     const adjustments = photoAnalysisService.generateAdjustmentPreset(analysisResult.colorFeedback);
-    
+
     setManualAdjustments(prev => ({
       brightness: (prev?.brightness || 0) + adjustments.brightness,
       contrast: (prev?.contrast || 0) + adjustments.contrast,
@@ -2109,17 +2420,23 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col z-50 safe-area-top safe-area-bottom">
-      
+
       <div className="relative flex-1 overflow-hidden bg-black">
-        
-        
+
+
         {Object.keys(capturedImages).length > 0 && !capturedImage ? (
           /* Multi-Capture Results - 5 Mode Photos Grid */
           <div className="relative w-full h-full bg-black flex flex-col">
-            
+
             <div className="sticky top-0 z-30 flex items-center justify-between px-4 py-4 bg-black/90 backdrop-blur-sm border-b border-white/10 safe-area-top">
               <button
                 onClick={() => {
+                  // 清理 blob URLs 避免記憶體洩漏
+                  Object.values(capturedImages).forEach(data => {
+                    if (data.image && data.image.startsWith('blob:')) {
+                      URL.revokeObjectURL(data.image);
+                    }
+                  });
                   setCapturedImages({});
                   setRawBaseImage(null);
                   initCamera();
@@ -2136,22 +2453,50 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               <span className="text-gray-400 text-sm">{Object.keys(capturedImages).length} 張</span>
             </div>
 
-            
+
             <div className="flex-1 overflow-y-auto pb-32 px-2">
               <div className="grid grid-cols-2 gap-2 p-2">
                 {Object.entries(capturedImages).map(([modeId, data]) => (
-                  <div 
-                    key={modeId} 
+                  <div
+                    key={modeId}
                     className="relative aspect-[4/5] rounded-xl overflow-hidden bg-gray-900 border-2 border-white/10 hover:border-purple-500 transition-all cursor-pointer"
                     onClick={() => {
                       setCapturedImage(data.image);
                       setSelectedMode(modeId);
+                      // 從風格的基礎參數計算初始調整值
+                      // brightness: 1.0 = 0, contrast: 1.0 = 0, saturation: 1.0 = 0
+                      const baseFilters = data.baseFilters || {};
+                      const initialAdjustments = {
+                        brightness: Math.round(((baseFilters.brightness || 1) - 1) * 50),
+                        contrast: Math.round(((baseFilters.contrast || 1) - 1) * 50),
+                        saturation: Math.round(((baseFilters.saturation || 1) - 1) * 50),
+                        warmth: Math.round((baseFilters.warmth || 0) / 2)
+                      };
+                      // 合併用戶之前的額外調整
+                      const userAdj = data.userAdjustments || { brightness: 0, contrast: 0, saturation: 0, warmth: 0 };
+                      const finalAdjustments = {
+                        brightness: initialAdjustments.brightness + userAdj.brightness,
+                        contrast: initialAdjustments.contrast + userAdj.contrast,
+                        saturation: initialAdjustments.saturation + userAdj.saturation,
+                        warmth: initialAdjustments.warmth + userAdj.warmth
+                      };
+                      setManualAdjustments(finalAdjustments);
+                      stateRef.current.manualAdjustments = finalAdjustments;
+                      console.log('📷 Selected style:', modeId, 'Base:', baseFilters, 'Adjustments:', finalAdjustments);
                     }}
                   >
-                    <img 
-                      src={data.image} 
-                      alt={data.name} 
+                    <img
+                      src={data.image}
+                      alt={data.name}
                       className="w-full h-full object-cover"
+                      style={{
+                        filter: `brightness(${100 + (data.userAdjustments?.brightness || 0)}%) contrast(${100 + (data.userAdjustments?.contrast || 0)}%) saturate(${100 + (data.userAdjustments?.saturation || 0)}%)${(data.userAdjustments?.warmth || 0) > 0
+                          ? ` sepia(${(data.userAdjustments?.warmth || 0) * 0.8}%)`
+                          : (data.userAdjustments?.warmth || 0) < 0
+                            ? ` hue-rotate(${(data.userAdjustments?.warmth || 0) * 0.6}deg)`
+                            : ''
+                          }`
+                      }}
                     />
                     <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
                       <p className="text-white text-sm font-medium text-center">
@@ -2159,14 +2504,35 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                       </p>
                     </div>
                     <button
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        const link = document.createElement('a');
-                        link.href = data.image;
-                        link.download = `food-${modeId}-${Date.now()}.jpg`;
-                        link.click();
+                        try {
+                          // 使用 blob 直接下載
+                          if (data.blob) {
+                            const url = URL.createObjectURL(data.blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = `food-${data.nameEn || modeId}-${Date.now()}.jpg`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            URL.revokeObjectURL(url);
+                            console.log('✅ Downloaded:', data.nameEn);
+                          } else if (data.image) {
+                            // 使用 canvas 重新生成
+                            const link = document.createElement('a');
+                            link.href = data.image;
+                            link.download = `food-${data.nameEn || modeId}-${Date.now()}.jpg`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            console.log('✅ Downloaded (fallback):', data.nameEn);
+                          }
+                        } catch (err) {
+                          console.error('❌ Download failed:', err);
+                        }
                       }}
-                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center"
+                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center hover:bg-black/70 transition-colors"
                     >
                       <Download className="w-4 h-4 text-white" />
                     </button>
@@ -2175,30 +2541,56 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             </div>
 
-            
-            <div 
+
+            <div
               className="absolute left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent pt-6 pb-6 px-4"
-              style={{ bottom: isEmbedded ? '80px' : '0px' }}
+              style={{ bottom: isEmbedded ? 'calc(80px + env(safe-area-inset-bottom, 0px))' : 'env(safe-area-inset-bottom, 0px)' }}
             >
               <div className="flex gap-3">
                 <button
                   onClick={() => {
-                    Object.entries(capturedImages).forEach(([modeId, data], index) => {
+                    const entries = Object.entries(capturedImages);
+                    console.log('📥 Starting batch download of', entries.length, 'photos');
+                    entries.forEach(([modeId, data], index) => {
                       setTimeout(() => {
-                        const link = document.createElement('a');
-                        link.href = data.image;
-                        link.download = `food-${modeId}-${Date.now()}.jpg`;
-                        link.click();
-                      }, index * 300);
+                        try {
+                          if (data.blob) {
+                            const url = URL.createObjectURL(data.blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = `food-${data.nameEn || modeId}-${Date.now()}.jpg`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                            console.log('✅ Downloaded:', data.nameEn);
+                          } else if (data.image) {
+                            const link = document.createElement('a');
+                            link.href = data.image;
+                            link.download = `food-${data.nameEn || modeId}-${Date.now()}.jpg`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                          }
+                        } catch (err) {
+                          console.error('❌ Download failed for', modeId, err);
+                        }
+                      }, index * 500); // 增加間隔到 500ms 確保穩定下載
                     });
                   }}
-                  className="flex-1 py-3 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center gap-2"
+                  className="flex-1 py-3 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center gap-2 hover:bg-white/15 transition-colors"
                 >
                   <Download className="w-5 h-5 text-white" />
                   <span className="text-white font-medium">{t('camera.downloadAll') || '下載全部'}</span>
                 </button>
                 <button
                   onClick={() => {
+                    // 清理 blob URLs 避免記憶體洩漏
+                    Object.values(capturedImages).forEach(data => {
+                      if (data.image && data.image.startsWith('blob:')) {
+                        URL.revokeObjectURL(data.image);
+                      }
+                    });
                     setCapturedImages({});
                     setRawBaseImage(null);
                     initCamera();
@@ -2214,7 +2606,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         ) : capturedImage ? (
           /* Single Captured Image Preview */
           <div className="relative w-full h-full bg-black flex flex-col">
-            
+
             <div className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-black/90 backdrop-blur-sm border-b border-white/10 safe-area-top">
               <button
                 onClick={() => {
@@ -2239,42 +2631,39 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </button>
             </div>
 
-            
+
             <div className="flex-1 flex items-center justify-center overflow-hidden pb-64">
               <img
                 src={capturedImage}
                 alt="Captured"
                 className="max-w-full max-h-full object-contain transition-all duration-150"
                 style={{
-                  filter: `brightness(${100 + manualAdjustments.brightness}%) contrast(${100 + manualAdjustments.contrast}%) saturate(${100 + manualAdjustments.saturation}%)${
-                    manualAdjustments.warmth > 0 
-                      ? ` sepia(${manualAdjustments.warmth * 0.8}%)` 
-                      : manualAdjustments.warmth < 0 
-                        ? ` hue-rotate(${manualAdjustments.warmth * 0.6}deg)` 
-                        : ''
-                  }`
+                  filter: `brightness(${100 + manualAdjustments.brightness}%) contrast(${100 + manualAdjustments.contrast}%) saturate(${100 + manualAdjustments.saturation}%)${manualAdjustments.warmth > 0
+                    ? ` sepia(${manualAdjustments.warmth * 0.8}%)`
+                    : manualAdjustments.warmth < 0
+                      ? ` hue-rotate(${manualAdjustments.warmth * 0.6}deg)`
+                      : ''
+                    }`
                 }}
               />
             </div>
 
-            
-            <div 
+
+            <div
               className="absolute left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent pt-8 pb-8 px-4"
-              style={{ bottom: isEmbedded ? '80px' : '0px' }}
+              style={{ bottom: isEmbedded ? 'calc(80px + env(safe-area-inset-bottom, 0px))' : 'env(safe-area-inset-bottom, 0px)' }}
             >
-              
+
               <button
                 onClick={analyzePhoto}
                 disabled={isAnalyzing}
-                className={`w-full mb-3 p-4 rounded-xl flex items-center gap-3 transition-all active:scale-[0.98] ${
-                  analysisResult 
-                    ? 'bg-purple-500/20 border-2 border-purple-500' 
-                    : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'
-                }`}
+                className={`w-full mb-3 p-4 rounded-xl flex items-center gap-3 transition-all active:scale-[0.98] ${analysisResult
+                  ? 'bg-purple-500/20 border-2 border-purple-500'
+                  : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'
+                  }`}
               >
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                  analysisResult ? 'bg-purple-500' : 'bg-white/20'
-                }`}>
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${analysisResult ? 'bg-purple-500' : 'bg-white/20'
+                  }`}>
                   {isAnalyzing ? (
                     <Loader2 className="w-6 h-6 text-white animate-spin" />
                   ) : (
@@ -2297,7 +2686,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                 )}
               </button>
 
-              
+
               <button
                 onClick={() => setShowRestaurantPicker(true)}
                 className="w-full mb-3 p-3 bg-white/10 backdrop-blur-sm rounded-xl flex items-center gap-3 border border-white/20 active:scale-[0.98] transition-all"
@@ -2316,15 +2705,14 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                 <ChevronRight className="w-5 h-5 text-gray-400" />
               </button>
 
-              
+
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleLikePhoto}
-                  className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 transition-all ${
-                    isPhotoLiked 
-                      ? 'bg-pink-500/20 border border-pink-500' 
-                      : 'bg-white/10 border border-white/20'
-                  }`}
+                  className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 transition-all ${isPhotoLiked
+                    ? 'bg-pink-500/20 border border-pink-500'
+                    : 'bg-white/10 border border-white/20'
+                    }`}
                 >
                   <Heart className={`w-5 h-5 ${isPhotoLiked ? 'text-pink-500 fill-pink-500' : 'text-white'}`} />
                   <span className={`text-sm font-medium ${isPhotoLiked ? 'text-pink-500' : 'text-white'}`}>
@@ -2344,11 +2732,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   <button
                     onClick={shareToRestaurant}
                     disabled={isSharing || shared}
-                    className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 transition-all ${
-                      shared 
-                        ? 'bg-green-500/20 border border-green-500' 
-                        : 'bg-green-500 hover:bg-green-600'
-                    }`}
+                    className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 transition-all ${shared
+                      ? 'bg-green-500/20 border border-green-500'
+                      : 'bg-green-500 hover:bg-green-600'
+                      }`}
                   >
                     {isSharing ? (
                       <Loader2 className="w-5 h-5 text-white animate-spin" />
@@ -2365,11 +2752,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   <button
                     onClick={saveToProfile}
                     disabled={isSavingPhoto || photoSaved}
-                    className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 transition-all ${
-                      photoSaved 
-                        ? 'bg-green-500/20 border border-green-500' 
-                        : 'bg-green-500 hover:bg-green-600'
-                    }`}
+                    className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 transition-all ${photoSaved
+                      ? 'bg-green-500/20 border border-green-500'
+                      : 'bg-green-500 hover:bg-green-600'
+                      }`}
                   >
                     {isSavingPhoto ? (
                       <Loader2 className="w-5 h-5 text-white animate-spin" />
@@ -2385,7 +2771,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                 )}
               </div>
 
-              
+
               <button
                 onClick={retakePhoto}
                 className="w-full mt-4 py-3 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center gap-2"
@@ -2406,7 +2792,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             />
             <canvas ref={canvasRef} className="hidden" />
 
-            
+
             {!cameraReady && !error && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
                 <Loader2 className="w-10 h-10 text-green-400 animate-spin" />
@@ -2422,7 +2808,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             )}
 
-            
+
             {multiCaptureMode && captureProgress.total > 0 && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-30">
                 <div className="text-center p-6 bg-gray-900/90 rounded-2xl backdrop-blur-sm border border-white/10">
@@ -2463,7 +2849,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             )}
 
-            
+
             {markerPosition && (
               <div
                 className="absolute pointer-events-none border-2 border-yellow-400 w-16 h-16 -ml-8 -mt-8 transition-all duration-200"
@@ -2471,22 +2857,21 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               />
             )}
 
-            
+
             {supportsZoom && !showAdjustmentsPopup && (
-              <div 
+              <div
                 className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 z-20"
-                style={{ bottom: isEmbedded ? '180px' : '140px' }}
+                style={{ bottom: isEmbedded ? 'calc(180px + env(safe-area-inset-bottom, 0px))' : 'calc(140px + env(safe-area-inset-bottom, 0px))' }}
               >
                 <div className="flex items-center gap-1 px-2 py-1.5 bg-black/60 backdrop-blur-sm rounded-full">
                   {zoomPresets.map(preset => (
                     <button
                       key={preset.value}
                       onClick={() => handleZoomChange(preset.value)}
-                      className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
-                        Math.abs(zoom - preset.value) < 0.1 
-                          ? 'bg-yellow-500 text-black' 
-                          : 'text-white/80 hover:bg-white/20'
-                      }`}
+                      className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${Math.abs(zoom - preset.value) < 0.1
+                        ? 'bg-yellow-500 text-black'
+                        : 'text-white/80 hover:bg-white/20'
+                        }`}
                     >
                       {preset.label}
                     </button>
@@ -2498,252 +2883,341 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         )}
       </div>
 
-      
+
       {!capturedImage && Object.keys(capturedImages).length === 0 && (
         <div className="absolute top-0 left-0 right-0 z-20 safe-area-top">
           <div className="flex justify-between items-center px-4 pt-3 pb-2">
-            
-            <button 
-              onClick={() => setShowSettingsPopup(true)} 
-              className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/90 hover:bg-black/60 transition-all"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
 
-          
-          <div className="flex gap-3">
-            <button 
-              onClick={() => setShowGrid(!showGrid)} 
-              className={`w-10 h-10 rounded-full backdrop-blur-sm flex items-center justify-center transition-all ${
-                showGrid ? 'bg-yellow-500/80 text-black' : 'bg-black/40 text-white/90 hover:bg-black/60'
-              }`}
-            >
-              <Grid3X3 className="w-5 h-5" />
-            </button>
-            <button 
-              onClick={switchCamera} 
-              className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/90 hover:bg-black/60 transition-all"
-            >
-              <RotateCcw className="w-5 h-5" />
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStabilizationEnabled(!stabilizationEnabled)}
+                className={`w-10 h-10 rounded-full backdrop-blur-sm flex items-center justify-center transition-all ${stabilizationEnabled
+                  ? 'bg-green-500/80 text-white'
+                  : 'bg-black/40 text-white/90 hover:bg-black/60'
+                  }`}
+                title={stabilizationEnabled ? (isStable ? '穩定' : `運動: ${Math.round(motionLevel)}%`) : '防手震'}
+              >
+                <Zap className="w-5 h-5" />
+              </button>
+            </div>
+
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowGrid(!showGrid)}
+                className={`w-10 h-10 rounded-full backdrop-blur-sm flex items-center justify-center transition-all ${showGrid ? 'bg-yellow-500/80 text-black' : 'bg-black/40 text-white/90 hover:bg-black/60'
+                  }`}
+              >
+                <Grid3X3 className="w-5 h-5" />
+              </button>
+              <button
+                onClick={switchCamera}
+                className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/90 hover:bg-black/60 transition-all"
+              >
+                <RotateCcw className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
-      </div>
       )}
 
-      
-      <div className={`camera-bottom-bar ${isEmbedded ? 'embedded' : ''}`}>
-        
-        <button className="w-12 h-12 rounded-lg bg-gray-800 overflow-hidden border border-white/20">
-          {capturedImage ? (
-            <img src={capturedImage} className="w-full h-full object-cover" alt="Preview" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gray-900">
-              <User className="w-6 h-6 text-gray-400" />
-            </div>
-          )}
-        </button>
 
-        
-        <div className="flex items-center gap-3">
-          
-          {!capturedImage && !multiCaptureMode && cameraReady && (
-            <button 
-              onClick={captureAIVariations}
-              className="w-14 h-14 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center shadow-lg active:scale-95 transition-transform"
-              title={t('camera.captureAllModes')}
-            >
-              <Sparkles className="w-7 h-7 text-white" />
-            </button>
-          )}
-          
-          
-          {!capturedImage ? (
-            <button onClick={capturePhoto} className="shutter-button">
-              <div className="shutter-button-inner" />
-            </button>
-          ) : (
-            <button onClick={() => {
-              setCapturedImage(null);
-              setCapturedImages({});
-              setAnalysisResult(null);
-              setShowAnalysisPanel(false);
-              setIsAnalyzing(false);
-              initCamera();
-            }} className="shutter-button border-red-500">
-              <div className="shutter-button-inner bg-red-500 rounded-lg" style={{ transform: 'scale(0.6)' }} />
-            </button>
-          )}
+      <div className={`camera-bottom-bar ${isEmbedded ? 'embedded' : ''} z-20 flex justify-center pb-8`}>
+        <div className="flex items-center justify-around w-full max-w-md liquid-glass-dark p-4 border-white/10 mx-4">
+          <button
+            onClick={handleOpenPhotoGallery}
+            className="w-14 h-14 rounded-2xl liquid-glass border-white/10 overflow-hidden active:scale-95 transition-all"
+            title={t('camera.viewPhotos') || '查看照片'}
+          >
+            {capturedImage ? (
+              <img src={capturedImage} className="w-full h-full object-cover" alt="Preview" />
+            ) : userPhotos && userPhotos.length > 0 && userPhotos[0]?.imageURL ? (
+              <img src={userPhotos[0].imageURL} className="w-full h-full object-cover" alt="Latest photo" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-white/5">
+                <Image className="w-6 h-6 text-white" />
+              </div>
+            )}
+          </button>
+
+          <div className="flex items-center gap-6">
+            {!capturedImage && !multiCaptureMode && cameraReady && (
+              <button
+                onClick={captureAIVariations}
+                className="w-14 h-14 rounded-2xl liquid-glass border-white/10 flex items-center justify-center shadow-lg active:scale-95 transition-all group"
+                title={t('camera.captureAllModes')}
+              >
+                <Sparkles className="w-7 h-7 text-purple-400 group-hover:scale-110 transition-transform" />
+              </button>
+            )}
+
+
+            {/* 穩定狀態指示器 */}
+            {stabilizationEnabled && !capturedImage && (
+              <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: isEmbedded ? 'calc(220px + env(safe-area-inset-bottom, 0px))' : 'calc(180px + env(safe-area-inset-bottom, 0px))' }}>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-black/60 backdrop-blur-sm rounded-full">
+                  <div className={`w-2 h-2 rounded-full transition-all ${isStable ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
+                  <span className="text-white text-xs font-medium">
+                    {isStable ? '穩定' : `運動: ${Math.round(motionLevel)}%`}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {!capturedImage ? (
+              <button
+                onClick={capturePhoto}
+                className={`w-20 h-20 rounded-full border-4 border-white/30 p-1 transition-all active:scale-90 hover:border-white/50 ${stabilizationEnabled && !isStable ? 'opacity-70' : ''}`}
+                disabled={stabilizationEnabled && !isStable}
+                title={stabilizationEnabled && !isStable ? '等待畫面穩定...' : '拍照'}
+              >
+                <div className="w-full h-full bg-white rounded-full shadow-[0_0_20px_rgba(255,255,255,0.5)]" />
+              </button>
+            ) : (
+              <button onClick={() => {
+                setCapturedImage(null);
+                setCapturedImages({});
+                setAnalysisResult(null);
+                setShowAnalysisPanel(false);
+                setIsAnalyzing(false);
+                initCamera();
+              }} className="w-20 h-20 rounded-full border-4 border-red-500/30 p-1 transition-all active:scale-90 hover:border-red-500/50">
+                <div className="w-full h-full bg-red-500 rounded-lg shadow-[0_0_20px_rgba(239,68,68,0.5)]" style={{ transform: 'scale(0.6)' }} />
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowAdjustmentsPopup(true)}
+            className="w-14 h-14 rounded-2xl liquid-glass border-white/10 flex items-center justify-center active:scale-95 transition-all"
+          >
+            <Sliders className="w-6 h-6 text-white" />
+          </button>
         </div>
-
-        
-        <button
-          onClick={() => setShowAdjustmentsPopup(true)}
-          className="control-btn"
-          style={{ width: 50, height: 50, background: 'rgba(50,50,50,0.5)' }}
-        >
-          <Sliders className="w-6 h-6" />
-        </button>
       </div>
 
-      
 
-      
+
+
       {showAdjustmentsPopup && (
         <div
           className="absolute left-0 right-0 z-30 pointer-events-none"
-          style={{ bottom: isEmbedded ? '180px' : '120px' }}
+          style={{ bottom: isEmbedded ? 'calc(100px + env(safe-area-inset-bottom, 0px))' : 'calc(60px + env(safe-area-inset-bottom, 0px))' }}
         >
-          <div className="mx-4 pointer-events-auto">
-            
-            <div className="flex items-center justify-center gap-2 mb-3">
-              {[
-                { key: 'brightness', label: '亮度' },
-                { key: 'contrast', label: '對比' },
-                { key: 'saturation', label: '飽和' },
-                { key: 'warmth', label: '色溫' },
-              ].map(adj => (
+          <div className="mx-3 pointer-events-auto">
+            <div className="bg-black/85 backdrop-blur-xl rounded-2xl p-4 border border-white/10 shadow-2xl">
+              {/* 標題與關閉 */}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-purple-400" />
+                  <span className="text-white font-semibold text-sm">調整參數</span>
+                </div>
                 <button
-                  key={adj.key}
-                  onClick={() => setActiveAdjustment(adj.key)}
-                  className={`px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-all ${
-                    activeAdjustment === adj.key
-                      ? 'bg-white/30 backdrop-blur-sm'
-                      : 'bg-black/20 backdrop-blur-sm opacity-70 hover:opacity-100'
-                  }`}
+                  onClick={() => setShowAdjustmentsPopup(false)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all"
                 >
-                  <span className="text-white text-xs font-medium">{adj.label}</span>
-                  {activeAdjustment === adj.key && (
-                    <span className="text-white text-xs font-medium">{manualAdjustments[adj.key]}</span>
-                  )}
+                  <X className="w-4 h-4 text-white" />
                 </button>
-              ))}
-              <button
-                onClick={() => setShowAdjustmentsPopup(false)}
-                className="ml-2 w-8 h-8 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center opacity-70 hover:opacity-100"
-              >
-                <X className="w-4 h-4 text-white" />
-              </button>
-            </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                {[
+                  { key: 'brightness', label: '亮度' },
+                  { key: 'contrast', label: '對比' },
+                  { key: 'saturation', label: '飽和' },
+                  { key: 'warmth', label: '色溫' },
+                ].map(adj => (
+                  <button
+                    key={adj.key}
+                    onClick={() => setActiveAdjustment(adj.key)}
+                    className={`relative flex flex-col items-center justify-center py-2.5 px-3 rounded-xl transition-all ${activeAdjustment === adj.key
+                      ? 'bg-gradient-to-br from-purple-500/30 to-pink-500/30 border-2 border-purple-400/50'
+                      : 'bg-white/5 border border-white/10 hover:bg-white/10'
+                      }`}
+                  >
+                    <span className={`text-xs font-semibold ${activeAdjustment === adj.key ? 'text-purple-200' : 'text-gray-400'}`}>
+                      {adj.label}
+                    </span>
+                    {activeAdjustment === adj.key && (
+                      <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center">
+                        <span className="text-white text-[9px] font-bold">{manualAdjustments[adj.key]}</span>
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
 
-            
-            <div className="flex items-center gap-3 px-2 py-2 rounded-full bg-black/25 backdrop-blur-sm">
-              <span className="text-white/80 text-xs w-8 text-center font-medium">{manualAdjustments[activeAdjustment]}</span>
-              <input
-                type="range"
-                min="-50"
-                max="50"
-                value={manualAdjustments[activeAdjustment]}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value);
-                  setManualAdjustments(prev => ({ ...prev, [activeAdjustment]: val }));
-                  updateFiltersImmediately(activeAdjustment, val);
-                }}
-                className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
-                style={{
-                  background: `linear-gradient(to right, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.5) ${(manualAdjustments[activeAdjustment] + 50)}%, rgba(255,255,255,0.2) ${(manualAdjustments[activeAdjustment] + 50)}%, rgba(255,255,255,0.2) 100%)`
-                }}
-              />
-              <button
-                onClick={() => {
-                  setManualAdjustments(prev => ({ ...prev, [activeAdjustment]: 0 }));
-                  updateFiltersImmediately(activeAdjustment, 0);
-                }}
-                className="text-white/60 hover:text-white text-sm"
-              >
-                ↺
-              </button>
+              {/* 模式選擇 - 縮小按鈕，放在下方 */}
+              <div className="flex items-center justify-center gap-1 flex-nowrap overflow-x-auto px-1 scrollbar-hide">
+                {Object.entries(preferenceService.getModes()).map(([modeId, modeData]) => (
+                  <button
+                    key={modeId}
+                    onClick={() => {
+                      setSelectedMode(modeId);
+                      triggerImmediateAnalysis();
+                    }}
+                    className={`px-2.5 py-1.5 rounded-full flex items-center transition-all min-h-[36px] flex-shrink-0 ${selectedMode === modeId
+                      ? 'bg-green-500/30 backdrop-blur-sm border border-green-500/50'
+                      : 'bg-black/20 backdrop-blur-sm opacity-70 hover:opacity-100'
+                      }`}
+                  >
+                    <span className="text-white text-[10px] sm:text-[11px] font-medium whitespace-nowrap">
+                      {currentLanguage === 'zh-TW' ? modeData.name : modeData.nameEn}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+
+              <div className="flex items-center gap-2 sm:gap-3 px-2 py-2.5 rounded-full bg-black/25 backdrop-blur-sm">
+                <span className="text-white/80 text-xs sm:text-sm w-10 sm:w-12 text-center font-medium">{manualAdjustments[activeAdjustment]}</span>
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  value={manualAdjustments[activeAdjustment]}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    setManualAdjustments(prev => ({ ...prev, [activeAdjustment]: val }));
+                    updateFiltersImmediately(activeAdjustment, val);
+                  }}
+                  className="flex-1 h-2 sm:h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white touch-none"
+                  style={{
+                    background: `linear-gradient(to right, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.5) ${(manualAdjustments[activeAdjustment] + 50)}%, rgba(255,255,255,0.2) ${(manualAdjustments[activeAdjustment] + 50)}%, rgba(255,255,255,0.2) 100%)`
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    setManualAdjustments(prev => ({ ...prev, [activeAdjustment]: 0 }));
+                    updateFiltersImmediately(activeAdjustment, 0);
+                  }}
+                  className="text-white/60 hover:text-white text-base sm:text-sm min-w-[32px] min-h-[32px] flex items-center justify-center"
+                >
+                  ↺
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      
+
+
       {showSettingsPopup && (
-        <div 
+        <div
           className="absolute inset-0 z-40 flex"
           onClick={() => setShowSettingsPopup(false)}
         >
-          
+
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-          
-          
-          <div 
+
+
+          <div
             className="relative w-72 max-w-[80%] h-full bg-gray-900/95 backdrop-blur-md safe-area-top safe-area-bottom overflow-y-auto"
             onClick={e => e.stopPropagation()}
           >
-            
+
             <div className="sticky top-0 bg-gray-900/95 backdrop-blur-md px-4 py-4 border-b border-white/10">
               <div className="flex justify-between items-center">
-                <h3 className="text-white font-bold text-lg">{t('camera.settings')}</h3>
-                <button 
+                <h3 className="text-white font-bold text-lg">{t('camera.settings') || '設定'}</h3>
+                <button
                   onClick={() => setShowSettingsPopup(false)}
-                  className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center"
+                  className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
                 >
                   <X className="w-5 h-5 text-white" />
                 </button>
               </div>
             </div>
 
-            
-            <div className="p-4 space-y-4">
-              
-              <div>
-                <label className="text-white/60 text-xs uppercase tracking-wider mb-2 block">
-                  {t('camera.mode') || '拍攝模式'}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(preferenceService.getModes()).map(([modeId, modeData]) => (
-                    <button
-                      key={modeId}
-                      onClick={() => {
-                        setSelectedMode(modeId);
-                        setShowSettingsPopup(false);
-                        triggerImmediateAnalysis();
-                      }}
-                      className={`p-3 rounded-xl text-center transition-all ${
-                        selectedMode === modeId
-                          ? 'bg-green-500/20 border-2 border-green-500'
-                          : 'bg-white/5 border-2 border-transparent hover:bg-white/10'
-                      }`}
-                    >
-                      <div className="text-2xl mb-1">{modeData.icon}</div>
-                      <div className={`text-xs font-medium ${selectedMode === modeId ? 'text-green-400' : 'text-white/80'}`}>
-                        {currentLanguage === 'zh-TW' ? modeData.name : modeData.nameEn}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
 
-              
-              <div className="pt-2 border-t border-white/10">
-                <label className="text-white/60 text-xs uppercase tracking-wider mb-2 block">
-                  {t('camera.quickSettings') || '快速設定'}
-                </label>
+            <div className="p-4 space-y-4">
+
+              {/* 解析度選擇 */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-purple-400" />
+                  <h4 className="text-white font-bold">拍攝解析度</h4>
+                </div>
+
                 <div className="space-y-2">
+                  {/* 1080p 選項 */}
                   <button
-                    onClick={() => setStabilizationEnabled(!stabilizationEnabled)}
-                    className={`w-full p-3 rounded-xl flex items-center justify-between transition-all ${
-                      stabilizationEnabled ? 'bg-green-500/20' : 'bg-white/5'
-                    }`}
+                    onClick={() => setResolution('1080p')}
+                    className={`w-full p-4 rounded-xl border-2 transition-all ${resolution === '1080p'
+                      ? 'bg-purple-500/20 border-purple-500'
+                      : 'bg-gray-800/50 border-gray-700 hover:border-gray-600'
+                      }`}
                   >
-                    <span className="text-white text-sm">{t('camera.stabilization') || '防手震'}</span>
-                    <div className={`w-10 h-6 rounded-full transition-all ${stabilizationEnabled ? 'bg-green-500' : 'bg-gray-600'}`}>
-                      <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mt-0.5 ${stabilizationEnabled ? 'translate-x-4.5 ml-0.5' : 'translate-x-0.5'}`} />
+                    <div className="flex items-start justify-between">
+                      <div className="text-left flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-white font-bold">1080p</span>
+                          <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded-full font-medium">
+                            推薦
+                          </span>
+                        </div>
+                        <p className="text-gray-400 text-xs mb-1">1920 × 1080</p>
+                        <p className="text-gray-500 text-xs">
+                          ⚡ 拍攝速度快・曝光時間短・較少模糊
+                        </p>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ml-2 ${resolution === '1080p'
+                        ? 'border-purple-500 bg-purple-500'
+                        : 'border-gray-600'
+                        }`}>
+                        {resolution === '1080p' && (
+                          <div className="w-2 h-2 bg-white rounded-full" />
+                        )}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 4K 選項 */}
+                  <button
+                    onClick={() => setResolution('4k')}
+                    className={`w-full p-4 rounded-xl border-2 transition-all ${resolution === '4k'
+                      ? 'bg-purple-500/20 border-purple-500'
+                      : 'bg-gray-800/50 border-gray-700 hover:border-gray-600'
+                      }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="text-left flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-white font-bold">4K Ultra HD</span>
+                          <Sparkles className="w-3 h-3 text-yellow-400" />
+                        </div>
+                        <p className="text-gray-400 text-xs mb-1">3840 × 2160</p>
+                        <p className="text-gray-500 text-xs">
+                          🎯 最高畫質・檔案較大・需要穩定拍攝
+                        </p>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ml-2 ${resolution === '4k'
+                        ? 'border-purple-500 bg-purple-500'
+                        : 'border-gray-600'
+                        }`}>
+                        {resolution === '4k' && (
+                          <div className="w-2 h-2 bg-white rounded-full" />
+                        )}
+                      </div>
                     </div>
                   </button>
                 </div>
+
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                  <p className="text-blue-400 text-xs">
+                    💡 提示：更改解析度會重新啟動相機
+                  </p>
+                </div>
               </div>
+
             </div>
           </div>
         </div>
       )}
 
-      
+
       {showAnalysisPanel && (
         <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex flex-col">
-          
+
           <div className="flex items-center justify-between p-4 pt-12 border-b border-gray-800">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
@@ -2762,7 +3236,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             </button>
           </div>
 
-          
+
           <div className="flex-1 overflow-y-auto p-4 pb-32">
             {isAnalyzing ? (
               <div className="flex flex-col items-center justify-center py-20">
@@ -2779,7 +3253,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
               </div>
             ) : analysisResult ? (
               <div className="space-y-4">
-                
+
                 <div className="bg-gradient-to-r from-purple-600/30 to-pink-600/30 rounded-2xl p-5 border border-purple-500/30">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-white font-medium">整體評分</span>
@@ -2789,7 +3263,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                     </div>
                   </div>
                   <div className="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-1000"
                       style={{ width: `${analysisResult.overallScore}%` }}
                     />
@@ -2797,7 +3271,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   <p className="text-purple-300 text-sm mt-3 italic">"{analysisResult.encouragement}"</p>
                 </div>
 
-                
+
                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
                     <Target className="w-5 h-5 text-blue-400" />
@@ -2810,14 +3284,14 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   </div>
                 </div>
 
-                
+
                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
                     <Palette className="w-5 h-5 text-yellow-400" />
                     <span className="text-white font-bold">🎨 色調調整建議</span>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    
+
                     <div className="bg-gray-900/50 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-gray-400 text-xs">亮度</span>
@@ -2829,10 +3303,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                           ) : (
                             <Minus className="w-3 h-3 text-gray-400" />
                           )}
-                          <span className={`text-sm font-medium ${
-                            analysisResult.colorFeedback.brightness.adjust > 0 ? 'text-green-400' :
+                          <span className={`text-sm font-medium ${analysisResult.colorFeedback.brightness.adjust > 0 ? 'text-green-400' :
                             analysisResult.colorFeedback.brightness.adjust < 0 ? 'text-red-400' : 'text-gray-400'
-                          }`}>
+                            }`}>
                             {analysisResult.colorFeedback.brightness.adjust > 0 ? '+' : ''}{analysisResult.colorFeedback.brightness.adjust}%
                           </span>
                         </div>
@@ -2840,7 +3313,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                       <p className="text-gray-500 text-xs">{analysisResult.colorFeedback.brightness.current}</p>
                     </div>
 
-                    
+
                     <div className="bg-gray-900/50 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-gray-400 text-xs">對比度</span>
@@ -2852,10 +3325,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                           ) : (
                             <Minus className="w-3 h-3 text-gray-400" />
                           )}
-                          <span className={`text-sm font-medium ${
-                            analysisResult.colorFeedback.contrast.adjust > 0 ? 'text-green-400' :
+                          <span className={`text-sm font-medium ${analysisResult.colorFeedback.contrast.adjust > 0 ? 'text-green-400' :
                             analysisResult.colorFeedback.contrast.adjust < 0 ? 'text-red-400' : 'text-gray-400'
-                          }`}>
+                            }`}>
                             {analysisResult.colorFeedback.contrast.adjust > 0 ? '+' : ''}{analysisResult.colorFeedback.contrast.adjust}%
                           </span>
                         </div>
@@ -2863,7 +3335,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                       <p className="text-gray-500 text-xs">{analysisResult.colorFeedback.contrast.current}</p>
                     </div>
 
-                    
+
                     <div className="bg-gray-900/50 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-gray-400 text-xs">飽和度</span>
@@ -2875,10 +3347,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                           ) : (
                             <Minus className="w-3 h-3 text-gray-400" />
                           )}
-                          <span className={`text-sm font-medium ${
-                            analysisResult.colorFeedback.saturation.adjust > 0 ? 'text-green-400' :
+                          <span className={`text-sm font-medium ${analysisResult.colorFeedback.saturation.adjust > 0 ? 'text-green-400' :
                             analysisResult.colorFeedback.saturation.adjust < 0 ? 'text-red-400' : 'text-gray-400'
-                          }`}>
+                            }`}>
                             {analysisResult.colorFeedback.saturation.adjust > 0 ? '+' : ''}{analysisResult.colorFeedback.saturation.adjust}%
                           </span>
                         </div>
@@ -2886,7 +3357,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                       <p className="text-gray-500 text-xs">{analysisResult.colorFeedback.saturation.current}</p>
                     </div>
 
-                    
+
                     <div className="bg-gray-900/50 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-gray-400 text-xs">色溫</span>
@@ -2898,10 +3369,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                           ) : (
                             <Minus className="w-3 h-3 text-gray-400" />
                           )}
-                          <span className={`text-sm font-medium ${
-                            analysisResult.colorFeedback.warmth.adjust > 0 ? 'text-orange-400' :
+                          <span className={`text-sm font-medium ${analysisResult.colorFeedback.warmth.adjust > 0 ? 'text-orange-400' :
                             analysisResult.colorFeedback.warmth.adjust < 0 ? 'text-blue-400' : 'text-gray-400'
-                          }`}>
+                            }`}>
                             {analysisResult.colorFeedback.warmth.adjust > 0 ? '+' : ''}{analysisResult.colorFeedback.warmth.adjust}
                           </span>
                         </div>
@@ -2911,7 +3381,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   </div>
                 </div>
 
-                
+
                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
                     <Grid3X3 className="w-5 h-5 text-green-400" />
@@ -2923,7 +3393,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
                   </div>
                 </div>
 
-                
+
                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
                     <Sparkles className="w-5 h-5 text-yellow-400" />
@@ -2947,7 +3417,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             )}
           </div>
 
-          
+
           {analysisResult && (
             <div className="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-gray-900/95 backdrop-blur-md border-t border-gray-700">
               <div className="flex gap-3">
@@ -2977,7 +3447,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         </div>
       )}
 
-      
+
       <RestaurantPicker
         isOpen={showRestaurantPicker}
         onClose={() => setShowRestaurantPicker(false)}
@@ -2992,7 +3462,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           }
 
           console.log('🚀 Starting share to restaurant:', restaurant.name);
-          
+
           try {
             await restaurantService.sharePhotoParams(
               restaurant.placeId,
@@ -3016,7 +3486,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             if (onPhotoShared) {
               onPhotoShared();
             }
-            
+
             return true; // 表示成功
           } catch (error) {
             console.error('❌ Failed to share photo params:', error);
@@ -3026,6 +3496,307 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         showShareOption={!!capturedImage && !!currentUser}
         userLocation={null}
       />
+
+      {/* Photo Gallery Modal */}
+      {showPhotoGallery && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex flex-col safe-area-top safe-area-bottom">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/10">
+            <h2 className="text-white text-lg font-semibold">
+              {t('camera.photoGallery') || '我的照片'}
+            </h2>
+            <button
+              onClick={() => {
+                setShowPhotoGallery(false);
+                setSelectedGalleryPhoto(null);
+              }}
+              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all"
+            >
+              <X className="w-5 h-5 text-white" />
+            </button>
+          </div>
+
+          {/* Photo Grid */}
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {!currentUser ? (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <User className="w-16 h-16 text-gray-500 mb-4" />
+                <p className="text-gray-400 text-lg mb-2">
+                  {t('auth.loginFirst') || '請先登入'}
+                </p>
+                <p className="text-gray-500 text-sm">
+                  {t('auth.loginToUse') || '登入以使用此功能'}
+                </p>
+              </div>
+            ) : loadingPhotos ? (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="w-8 h-8 text-white/50 animate-spin" />
+              </div>
+            ) : userPhotos.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <Image className="w-16 h-16 text-gray-500 mb-4" />
+                <p className="text-gray-400 text-lg mb-2">
+                  {t('camera.noPhotos') || '還沒有照片'}
+                </p>
+                <p className="text-gray-500 text-sm">
+                  {t('camera.noPhotosDesc') || '拍攝並儲存照片後，它們會顯示在這裡'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {userPhotos.map((photo) => (
+                  <button
+                    key={photo.id}
+                    onClick={() => setSelectedGalleryPhoto(photo)}
+                    className="aspect-square rounded-lg overflow-hidden bg-gray-800 border border-white/10 hover:border-white/30 transition-all active:scale-95 relative group"
+                  >
+                    <img
+                      src={photo.imageURL}
+                      alt="Photo"
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                    {/* Mode badge */}
+                    <div className="absolute top-1 left-1 text-sm drop-shadow-lg">
+                      {preferenceService.getModeParams(photo.mode)?.name === '自然' ? '📷' :
+                        preferenceService.getModeParams(photo.mode)?.name === '暖色調' ? '🌅' :
+                          preferenceService.getModeParams(photo.mode)?.name === '冷色調' ? '❄️' :
+                            preferenceService.getModeParams(photo.mode)?.name === '鮮豔' ? '🎨' :
+                              preferenceService.getModeParams(photo.mode)?.name === '柔和' ? '🌸' :
+                                preferenceService.getModeParams(photo.mode)?.name === '戲劇' ? '🎭' : '📷'}
+                    </div>
+                    {/* Like indicator */}
+                    {photo.isLiked && (
+                      <div className="absolute bottom-1 left-1">
+                        <Heart className="w-3 h-3 text-pink-400 fill-pink-400 drop-shadow-lg" />
+                      </div>
+                    )}
+                    {/* Restaurant indicator */}
+                    {photo.restaurantName && (
+                      <div className="absolute bottom-1 left-5">
+                        <MapPin className="w-3 h-3 text-green-400 drop-shadow-lg" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Photo Detail View */}
+      {selectedGalleryPhoto && (
+        <div className="fixed inset-0 z-[60] bg-black flex flex-col safe-area-top safe-area-bottom">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/10">
+            <button
+              onClick={() => setSelectedGalleryPhoto(null)}
+              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all"
+            >
+              <ArrowLeft className="w-5 h-5 text-white" />
+            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">
+                {preferenceService.getModeParams(selectedGalleryPhoto.mode)?.name === '自然' ? '📷' :
+                  preferenceService.getModeParams(selectedGalleryPhoto.mode)?.name === '暖色調' ? '🌅' :
+                    preferenceService.getModeParams(selectedGalleryPhoto.mode)?.name === '冷色調' ? '❄️' :
+                      preferenceService.getModeParams(selectedGalleryPhoto.mode)?.name === '鮮豔' ? '🎨' :
+                        preferenceService.getModeParams(selectedGalleryPhoto.mode)?.name === '柔和' ? '🌸' :
+                          preferenceService.getModeParams(selectedGalleryPhoto.mode)?.name === '戲劇' ? '🎭' : '📷'}
+              </span>
+              <span className="text-white text-lg font-semibold">
+                {currentLanguage === 'zh-TW'
+                  ? preferenceService.getModeParams(selectedGalleryPhoto.mode)?.name
+                  : preferenceService.getModeParams(selectedGalleryPhoto.mode)?.nameEn || selectedGalleryPhoto.mode}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                const link = document.createElement('a');
+                link.href = selectedGalleryPhoto.imageURL;
+                link.download = `photo-${selectedGalleryPhoto.id}.jpg`;
+                link.click();
+              }}
+              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all"
+            >
+              <Download className="w-5 h-5 text-white" />
+            </button>
+          </div>
+
+          {/* Photo */}
+          <div className="flex-1 flex items-center justify-center p-4 overflow-hidden">
+            <img
+              src={selectedGalleryPhoto.imageURL}
+              alt="Photo detail"
+              className="max-w-full max-h-full object-contain rounded-lg"
+            />
+          </div>
+
+          {/* Detailed Info */}
+          <div className="px-4 pb-4 pt-3 border-t border-white/10 max-h-[40vh] overflow-y-auto">
+            {/* Restaurant info */}
+            {selectedGalleryPhoto.restaurantName && (
+              <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
+                  <MapPin className="w-4 h-4 text-green-400" />
+                </div>
+                <div>
+                  <div className="text-white font-medium text-sm">{selectedGalleryPhoto.restaurantName}</div>
+                  <div className="text-gray-400 text-xs">{currentLanguage === 'zh-TW' ? '拍攝地點' : 'Location'}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Date and like status */}
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-gray-400 text-sm">
+                {selectedGalleryPhoto.createdAt && new Date(selectedGalleryPhoto.createdAt).toLocaleString(currentLanguage === 'zh-TW' ? 'zh-TW' : 'en-US', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </p>
+              {selectedGalleryPhoto.isLiked && (
+                <div className="flex items-center gap-1 text-pink-400">
+                  <Heart className="w-4 h-4 fill-pink-400" />
+                  <span className="text-xs">{currentLanguage === 'zh-TW' ? '已喜愛' : 'Liked'}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Technical specs & adjustments */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Technical specs */}
+              <div className="bg-white/5 rounded-xl p-3">
+                <div className="text-gray-400 text-xs mb-2">{currentLanguage === 'zh-TW' ? '技術規格' : 'Specs'}</div>
+                <div className="space-y-1">
+                  {selectedGalleryPhoto.photoInfo ? (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '解析度' : 'Res'}</span>
+                        <span className="text-white text-xs">{selectedGalleryPhoto.photoInfo.width}x{selectedGalleryPhoto.photoInfo.height}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '大小' : 'Size'}</span>
+                        <span className="text-white text-xs">{selectedGalleryPhoto.photoInfo.size} MB</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '縮放' : 'Zoom'}</span>
+                      <span className="text-white text-xs">{selectedGalleryPhoto.zoom?.toFixed(1) || '1.0'}x</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '格式' : 'Format'}</span>
+                    <span className="text-white text-xs">{selectedGalleryPhoto.photoInfo?.format || 'JPEG'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Manual adjustments */}
+              <div className="bg-white/5 rounded-xl p-3">
+                <div className="text-gray-400 text-xs mb-2">{currentLanguage === 'zh-TW' ? '調整參數' : 'Adjustments'}</div>
+                {selectedGalleryPhoto.manualAdjustments ? (
+                  <div className="space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '亮度' : 'Bright'}</span>
+                      <span className="text-amber-400 text-xs">
+                        {selectedGalleryPhoto.manualAdjustments.brightness > 0 ? '+' : ''}{selectedGalleryPhoto.manualAdjustments.brightness || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '對比' : 'Contrast'}</span>
+                      <span className="text-blue-400 text-xs">
+                        {selectedGalleryPhoto.manualAdjustments.contrast > 0 ? '+' : ''}{selectedGalleryPhoto.manualAdjustments.contrast || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '飽和' : 'Sat'}</span>
+                      <span className="text-pink-400 text-xs">
+                        {selectedGalleryPhoto.manualAdjustments.saturation > 0 ? '+' : ''}{selectedGalleryPhoto.manualAdjustments.saturation || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '色溫' : 'Warmth'}</span>
+                      <span className="text-orange-400 text-xs">
+                        {selectedGalleryPhoto.manualAdjustments.warmth > 0 ? '+' : ''}{selectedGalleryPhoto.manualAdjustments.warmth || 0}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '無調整' : 'None'}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Applied filters */}
+            {selectedGalleryPhoto.filters && (
+              <div className="mt-3 bg-white/5 rounded-xl p-3">
+                <div className="text-gray-400 text-xs mb-2">{currentLanguage === 'zh-TW' ? '套用的濾鏡' : 'Applied Filters'}</div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedGalleryPhoto.filters.brightness && (
+                    <span className="px-2 py-1 bg-amber-500/20 text-amber-400 text-xs rounded">
+                      {currentLanguage === 'zh-TW' ? '亮度' : 'B'}: {Math.round(selectedGalleryPhoto.filters.brightness)}%
+                    </span>
+                  )}
+                  {selectedGalleryPhoto.filters.contrast && (
+                    <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">
+                      {currentLanguage === 'zh-TW' ? '對比' : 'C'}: {Math.round(selectedGalleryPhoto.filters.contrast)}%
+                    </span>
+                  )}
+                  {selectedGalleryPhoto.filters.saturate && (
+                    <span className="px-2 py-1 bg-pink-500/20 text-pink-400 text-xs rounded">
+                      {currentLanguage === 'zh-TW' ? '飽和' : 'S'}: {Math.round(selectedGalleryPhoto.filters.saturate)}%
+                    </span>
+                  )}
+                  {selectedGalleryPhoto.filters.warmth !== undefined && (
+                    <span className="px-2 py-1 bg-orange-500/20 text-orange-400 text-xs rounded">
+                      {currentLanguage === 'zh-TW' ? '色溫' : 'W'}: {selectedGalleryPhoto.filters.warmth}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* AI Context */}
+            {selectedGalleryPhoto.context && (
+              <div className="mt-3 bg-purple-500/10 border border-purple-500/20 rounded-xl p-3">
+                <div className="text-gray-400 text-xs mb-2">{currentLanguage === 'zh-TW' ? 'AI 環境分析' : 'AI Analysis'}</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '光線' : 'Light'}</span>
+                    <span className="text-purple-400 text-xs">
+                      {selectedGalleryPhoto.context.isLowLight ? (currentLanguage === 'zh-TW' ? '低光源' : 'Low') :
+                        selectedGalleryPhoto.context.isBacklit ? (currentLanguage === 'zh-TW' ? '逆光' : 'Backlit') :
+                          (currentLanguage === 'zh-TW' ? '正常' : 'Normal')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '亮度' : 'Bright'}</span>
+                    <span className="text-purple-400 text-xs">{selectedGalleryPhoto.context.brightness}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '色溫' : 'Color'}</span>
+                    <span className="text-purple-400 text-xs">
+                      {selectedGalleryPhoto.context.isWarmTone ? (currentLanguage === 'zh-TW' ? '暖' : 'Warm') :
+                        selectedGalleryPhoto.context.isCoolTone ? (currentLanguage === 'zh-TW' ? '冷' : 'Cool') :
+                          (currentLanguage === 'zh-TW' ? '中性' : 'Neutral')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">{currentLanguage === 'zh-TW' ? '飽和度' : 'Sat'}</span>
+                    <span className="text-purple-400 text-xs">{selectedGalleryPhoto.context.saturation}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
