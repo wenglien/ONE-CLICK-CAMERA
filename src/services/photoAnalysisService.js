@@ -279,23 +279,24 @@ Respond in JSON format.`;
 
         // Try to compress to under 1MB
         let compressed = canvas.toDataURL('image/jpeg', quality);
-        let iterations = 0;
-        const maxIterations = 5;
+        const TARGET_SIZE = 1024 * 1024; // 1MB in base64 chars
 
-        // If image is too large, reduce quality iteratively
-        while (compressed.length > 1024 * 1024 && iterations < maxIterations) {
-          quality -= 0.1;
-          if (quality < 0.3) {
-            // If quality is too low, reduce dimensions instead
-            width = Math.floor(width * 0.8);
-            height = Math.floor(height * 0.8);
+        // Single dimension-scale pass if still too large after initial encode
+        if (compressed.length > TARGET_SIZE) {
+          // Estimate required quality via ratio (base64 length is proportional to size)
+          const ratio = TARGET_SIZE / compressed.length;
+          quality = Math.max(0.35, quality * ratio);
+          compressed = canvas.toDataURL('image/jpeg', quality);
+
+          // If still too large, reduce dimensions by 70% and retry once
+          if (compressed.length > TARGET_SIZE) {
+            width = Math.floor(width * 0.7);
+            height = Math.floor(height * 0.7);
             canvas.width = width;
             canvas.height = height;
             ctx.drawImage(img, 0, 0, width, height);
-            quality = 0.7;
+            compressed = canvas.toDataURL('image/jpeg', Math.max(0.5, quality));
           }
-          compressed = canvas.toDataURL('image/jpeg', quality);
-          iterations++;
         }
 
         const originalSize = Math.round(imageBase64.length / 1024);

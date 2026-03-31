@@ -113,6 +113,15 @@ const applyStyleToImageData = (imageData, style) => {
 };
 
 /**
+ * Yield control back to the event loop via MessageChannel (zero-delay, higher priority than setTimeout)
+ */
+const yieldToMain = () => new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = resolve;
+    channel.port2.postMessage(undefined);
+});
+
+/**
  * 批次處理圖像風格 - 使用 dataURL 作為輸入（更穩定）
  * @param {string} imageDataURL - base64 圖像數據
  * @param {Array} styles - 風格陣列
@@ -223,8 +232,8 @@ export const batchProcessStyles = async (sourceCanvas, styles = STYLE_PRESETS, m
                     onProgress(((i + 1) / styles.length) * 100, style.name);
                 }
 
-                // 讓出執行權
-                await new Promise(resolve => setTimeout(resolve, 10));
+                // 讓出執行權給主執行緒（MessageChannel 比 setTimeout 更即時）
+                await yieldToMain();
 
             } catch (err) {
                 console.error(`❌ Error processing ${style.name}:`, err);

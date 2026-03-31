@@ -120,6 +120,7 @@ const RestaurantCard = ({ restaurant, index, onClick }) => {
 const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = false }) => {
     const { t } = useLanguage();
     const mapRef = useRef(null);
+    const autocompleteServiceRef = useRef(null);
     const lastRefreshTriggerRef = useRef(0);
     const prevIsOpenRef = useRef(false);
 
@@ -150,6 +151,32 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         { id: 'cafe', label: '咖啡廳', icon: Sun },
         { id: 'bakery', label: '甜點烘焙', icon: Sparkles },
     ];
+
+    // Pre-generate marker icons keyed by restaurant id to avoid re-creating SVGs each render
+    const markerIconMap = useMemo(() => {
+        const map = new Map();
+        restaurants.forEach((restaurant) => {
+            const isHot = restaurant.photoCount > 5;
+            const color = isHot ? '#f59e0b' : '#22c55e';
+            const colorDark = isHot ? '#d97706' : '#16a34a';
+            const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 56" width="48" height="56">
+                <defs>
+                    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                        <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.3"/>
+                    </filter>
+                    <linearGradient id="grad${restaurant.id}" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:${color};stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:${colorDark};stop-opacity:1" />
+                    </linearGradient>
+                </defs>
+                <path d="M24 0C10.745 0 0 10.745 0 24c0 18 24 32 24 32s24-14 24-32C48 10.745 37.255 0 24 0z" fill="url(#grad${restaurant.id})" filter="url(#shadow)"/>
+                <circle cx="24" cy="22" r="14" fill="white"/>
+                <text x="24" y="28" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="900" fill="${color}">${restaurant.photoCount}</text>
+            </svg>`;
+            map.set(restaurant.id, 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svgStr));
+        });
+        return map;
+    }, [restaurants]);
 
     const filteredAndSortedRestaurants = useMemo(() => {
         let filtered = [...restaurants];
@@ -207,7 +234,7 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         );
     }, []);
 
-    const loadNearbyRestaurants = async (lat, lng) => {
+    const loadNearbyRestaurants = useCallback(async (lat, lng) => {
         try {
             setLoading(true);
             const nearbyRestaurants = await restaurantService.getNearbyRestaurantsWithPhotos(lat, lng, 10);
@@ -217,7 +244,7 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
     useEffect(() => {
         if (isOpen && isLoaded) {
@@ -238,6 +265,10 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
 
     const onMapLoad = useCallback((map) => {
         mapRef.current = map;
+        // Cache the AutocompleteService instance once the map is ready
+        if (window.google?.maps?.places) {
+            autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService();
+        }
     }, []);
 
     const handleRestaurantClick = (restaurant) => {
@@ -271,7 +302,13 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
 
         setLoading(true);
         try {
-            const autocompleteService = new window.google.maps.places.AutocompleteService();
+            // Reuse cached service instance instead of creating a new one each call
+            if (!autocompleteServiceRef.current && window.google?.maps?.places) {
+                autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService();
+            }
+            const autocompleteService = autocompleteServiceRef.current;
+            if (!autocompleteService) { setLoading(false); return; }
+
             const request = {
                 input: query,
                 types: ['restaurant', 'food', 'cafe', 'bakery'],
@@ -511,22 +548,7 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                                 }}
                                 onClick={() => handleRestaurantClick(restaurant)}
                                 icon={{
-                                    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 56" width="48" height="56">
-                                            <defs>
-                                                <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-                                                    <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.3"/>
-                                                </filter>
-                                                <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                                    <stop offset="0%" style="stop-color:${restaurant.photoCount > 5 ? '#f59e0b' : '#22c55e'};stop-opacity:1" />
-                                                    <stop offset="100%" style="stop-color:${restaurant.photoCount > 5 ? '#d97706' : '#16a34a'};stop-opacity:1" />
-                                                </linearGradient>
-                                            </defs>
-                                            <path d="M24 0C10.745 0 0 10.745 0 24c0 18 24 32 24 32s24-14 24-32C48 10.745 37.255 0 24 0z" fill="url(#grad)" filter="url(#shadow)"/>
-                                            <circle cx="24" cy="22" r="14" fill="white"/>
-                                            <text x="24" y="28" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="900" fill="${restaurant.photoCount > 5 ? '#f59e0b' : '#22c55e'}">${restaurant.photoCount}</text>
-                                        </svg>
-                                    `),
+                                    url: markerIconMap.get(restaurant.id) || '',
                                     scaledSize: new window.google.maps.Size(40, 48),
                                     anchor: new window.google.maps.Point(20, 48)
                                 }}

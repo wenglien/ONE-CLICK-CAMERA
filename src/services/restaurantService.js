@@ -5,11 +5,13 @@ import {
     getDoc,
     getDocs,
     setDoc,
+    updateDoc,
     addDoc,
     query,
     where,
     orderBy,
     limit,
+    increment,
     GeoPoint,
     Timestamp
 } from 'firebase/firestore';
@@ -18,6 +20,9 @@ class RestaurantService {
     constructor() {
         this.restaurantsCollection = 'restaurants';
         this.photosSubcollection = 'photos';
+        // Simple in-memory cache for nearby restaurants
+        this._cache = { data: null, timestamp: 0, lat: null, lng: null };
+        this._CACHE_TTL_MS = 60000; // 1 minute
     }
 
     async saveRestaurant(restaurant) {
@@ -110,12 +115,12 @@ class RestaurantService {
                 createdAt: Timestamp.now()
             });
 
+            // Atomically increment photoCount to avoid race conditions
             const restaurantRef = doc(db, this.restaurantsCollection, placeId);
-            const restaurantSnap = await getDoc(restaurantRef);
-            if (restaurantSnap.exists()) {
-                const currentCount = restaurantSnap.data().photoCount || 0;
-                await setDoc(restaurantRef, { photoCount: currentCount + 1 }, { merge: true });
-            }
+            await updateDoc(restaurantRef, { photoCount: increment(1) });
+
+            // Invalidate cache so next fetch reflects new data
+            this.invalidateCache();
 
             return photoDoc.id;
         } catch (error) {
@@ -126,23 +131,49 @@ class RestaurantService {
 
     async getNearbyRestaurantsWithPhotos(lat, lng, radiusKm = 5) {
         try {
+            // Return cached result if still fresh and location hasn't moved significantly
+            const now = Date.now();
+            const cache = this._cache;
+            if (
+                cache.data &&
+                now - cache.timestamp < this._CACHE_TTL_MS &&
+                cache.lat !== null &&
+                Math.abs(cache.lat - lat) < 0.01 &&
+                Math.abs(cache.lng - lng) < 0.01
+            ) {
+                return cache.data;
+            }
+
+            // Rough bounding box to reduce client-side filtering (1 degree ≈ 111 km)
+            const latDelta = radiusKm / 111;
+            const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+            const minLat = lat - latDelta;
+            const maxLat = lat + latDelta;
+
             const restaurantsRef = collection(db, this.restaurantsCollection);
             const q = query(
                 restaurantsRef,
                 where('photoCount', '>', 0),
                 orderBy('photoCount', 'desc'),
-                limit(50)
+                limit(100)
             );
 
             const querySnapshot = await getDocs(q);
             const restaurants = [];
 
-            querySnapshot.forEach((doc) => {
-                const data = doc.data();
-                const distance = this.calculateDistance(lat, lng, data.location.latitude, data.location.longitude);
+            querySnapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                const rLat = data.location.latitude;
+                const rLng = data.location.longitude;
+
+                // Quick bounding box pre-filter before expensive Haversine
+                if (rLat < minLat || rLat > maxLat) return;
+                if (Math.abs(rLng - lng) > lngDelta * 1.1) return;
+
+                const distance = this.calculateDistance(lat, lng, rLat, rLng);
                 if (distance <= radiusKm) {
                     restaurants.push({
-                        id: doc.id,
+                        id: docSnap.id,
                         ...data,
                         distance: Math.round(distance * 100) / 100
                     });
@@ -150,11 +181,19 @@ class RestaurantService {
             });
 
             restaurants.sort((a, b) => a.distance - b.distance);
+
+            // Update cache
+            this._cache = { data: restaurants, timestamp: now, lat, lng };
+
             return restaurants;
         } catch (error) {
             console.error('Failed to get nearby restaurants:', error);
             throw error;
         }
+    }
+
+    invalidateCache() {
+        this._cache = { data: null, timestamp: 0, lat: null, lng: null };
     }
 
     calculateDistance(lat1, lng1, lat2, lng2) {
@@ -194,14 +233,9 @@ class RestaurantService {
     async likePhotoParams(placeId, photoId) {
         try {
             const photoRef = doc(db, this.restaurantsCollection, placeId, this.photosSubcollection, photoId);
-            const photoSnap = await getDoc(photoRef);
-
-            if (photoSnap.exists()) {
-                const currentLikes = photoSnap.data().likes || 0;
-                await setDoc(photoRef, { likes: currentLikes + 1 }, { merge: true });
-                return true;
-            }
-            return false;
+            // Atomic increment — no need to read before write
+            await updateDoc(photoRef, { likes: increment(1) });
+            return true;
         } catch (error) {
             console.error('Failed to like photo params:', error);
             throw error;

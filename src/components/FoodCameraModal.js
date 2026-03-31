@@ -23,6 +23,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const previewCanvasRef = useRef(null);
+  const stabCanvasRef = useRef(null); // Reused canvas for stabilization motion detection
   const streamRef = useRef(null);
   const animationRef = useRef(null);
   const modelRef = useRef(null);
@@ -666,15 +667,23 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
   const startDetectionLoop = useCallback(() => {
     if (detectIntervalRef.current) {
-      clearInterval(detectIntervalRef.current);
+      clearTimeout(detectIntervalRef.current);
     }
 
-    detectIntervalRef.current = setInterval(async () => {
+    // Use recursive setTimeout instead of setInterval so slow detections don't stack up
+    const scheduleNext = () => {
+      detectIntervalRef.current = setTimeout(runDetection, 500);
+    };
+
+    const runDetection = async () => {
       const state = stateRef.current;
-      if (!state.marker || !modelRef.current || !videoRef.current || !canvasRef.current) return;
+      if (!state.marker || !modelRef.current || !videoRef.current || !canvasRef.current) {
+        scheduleNext();
+        return;
+      }
 
       const video = videoRef.current;
-      if (video.paused || video.ended) return;
+      if (video.paused || video.ended) { scheduleNext(); return; }
 
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
@@ -754,7 +763,10 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       } catch (e) {
         console.error('Detection error:', e);
       }
-    }, 500); // Increased from 250ms to 500ms for better performance
+      scheduleNext();
+    };
+
+    runDetection();
   }, [analyzeRegion]);
 
   const generateSettings = (analysis) => {
@@ -847,12 +859,15 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
         const vw = video.videoWidth;
         const vh = video.videoHeight;
 
-        canvas.width = vw;
-        canvas.height = vh;
+        // Only reset canvas dimensions when they actually change to avoid layout thrashing
+        if (canvas.width !== vw || canvas.height !== vh) {
+          canvas.width = vw;
+          canvas.height = vh;
+        }
 
         const currentFilters = stateRef.current.filters;
-        const manualAdj = stateRef.current.manualAdjustments;
 
+        // Clamp once — no redundant second pass
         const f = {
           brightness: Math.max(50, Math.min(200,
             (typeof currentFilters.brightness === 'number' ? currentFilters.brightness : 100)
@@ -868,11 +883,6 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           ))
         };
 
-        f.brightness = Math.max(50, Math.min(200, f.brightness));
-        f.contrast = Math.max(50, Math.min(200, f.contrast));
-        f.saturate = Math.max(50, Math.min(300, f.saturate));
-        f.warmth = Math.max(-75, Math.min(75, f.warmth));
-
         let drawX = 0;
         let drawY = 0;
         let drawWidth = vw;
@@ -884,15 +894,22 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
           const stab = stabilizationRef.current;
 
-          // 運動檢測 - 使用影像差異
+          // 運動檢測 - 使用影像差異（重用 stabCanvasRef，避免每幀建立新 canvas）
           let motionDetected = 0;
+          if (!stabCanvasRef.current) {
+            stabCanvasRef.current = document.createElement('canvas');
+          }
+          const tempCanvas = stabCanvasRef.current;
+          const stabW = Math.min(320, vw);
+          const stabH = Math.min(240, vh);
+          if (tempCanvas.width !== stabW || tempCanvas.height !== stabH) {
+            tempCanvas.width = stabW;
+            tempCanvas.height = stabH;
+          }
+          const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
           if (stab.prevFrame) {
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = Math.min(320, vw);
-            tempCanvas.height = Math.min(240, vh);
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-            const currentImageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            tempCtx.drawImage(video, 0, 0, stabW, stabH);
+            const currentImageData = tempCtx.getImageData(0, 0, stabW, stabH);
 
             let diff = 0;
             for (let i = 0; i < currentImageData.data.length; i += 4) {
@@ -917,13 +934,9 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
             stab.prevFrame = currentImageData;
           } else {
-            // 初始化第一幀
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = Math.min(320, vw);
-            tempCanvas.height = Math.min(240, vh);
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-            stab.prevFrame = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            // 初始化第一幀（重用 stabCanvasRef）
+            tempCtx.drawImage(video, 0, 0, stabW, stabH);
+            stab.prevFrame = tempCtx.getImageData(0, 0, stabW, stabH);
             setIsStable(true); // 初始化時允許拍攝
           }
 
@@ -1140,7 +1153,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
     }
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
-      if (detectIntervalRef.current) clearInterval(detectIntervalRef.current);
+      if (detectIntervalRef.current) clearTimeout(detectIntervalRef.current);
       if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
     };
   }, [isOpen, facingMode, capturedImage, capturedImages, multiCaptureMode, modelReady, modelLoading, initCamera]);
@@ -1369,7 +1382,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
   const capturePhoto = async () => {
     if (detectIntervalRef.current) {
-      clearInterval(detectIntervalRef.current);
+      clearTimeout(detectIntervalRef.current);
       detectIntervalRef.current = null;
     }
     if (animationRef.current) {
@@ -1481,7 +1494,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
     try {
       if (detectIntervalRef.current) {
-        clearInterval(detectIntervalRef.current);
+        clearTimeout(detectIntervalRef.current);
         detectIntervalRef.current = null;
       }
       if (animationRef.current) {
@@ -1593,7 +1606,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       console.error('Error in captureAIVariations:', error);
 
       if (detectIntervalRef.current) {
-        clearInterval(detectIntervalRef.current);
+        clearTimeout(detectIntervalRef.current);
         detectIntervalRef.current = null;
       }
       if (animationRef.current) {
@@ -2276,7 +2289,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       animationRef.current = null;
     }
     if (detectIntervalRef.current) {
-      clearInterval(detectIntervalRef.current);
+      clearTimeout(detectIntervalRef.current);
       detectIntervalRef.current = null;
     }
     if (streamRef.current) {
