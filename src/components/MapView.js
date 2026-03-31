@@ -473,19 +473,23 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                 </div>
 
                 {viewMode === 'map' && (
-                    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2">
-                        {categories.map((cat) => (
-                            <button
-                                key={cat.id}
-                                onClick={() => setActiveCategory(cat.id)}
-                                className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 ${activeCategory === cat.id ? 'bg-green-500 text-white shadow-lg' : 'liquid-glass text-gray-300 border-white/20'
-                                    }`}
-                            >
-                                <cat.icon className="w-3.5 h-3.5" />
-                                {cat.label}
-                            </button>
-                        ))}
-                        <button onClick={handleRefresh} className="w-11 h-11 flex items-center justify-center rounded-2xl liquid-glass border-white/20 ml-auto flex-shrink-0">
+                    <div className="flex items-center gap-2 pb-2">
+                        {/* 類別篩選按鈕：獨立可捲動區域，不影響 refresh 按鈕位置 */}
+                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+                            {categories.map((cat) => (
+                                <button
+                                    key={cat.id}
+                                    onClick={() => setActiveCategory(cat.id)}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 flex-shrink-0 ${activeCategory === cat.id ? 'bg-green-500 text-white shadow-lg' : 'liquid-glass text-gray-300 border-white/20'
+                                        }`}
+                                >
+                                    <cat.icon className="w-3.5 h-3.5" />
+                                    {cat.label}
+                                </button>
+                            ))}
+                        </div>
+                        {/* Refresh 按鈕固定在右側，不參與橫向捲動 */}
+                        <button onClick={handleRefresh} className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-2xl liquid-glass border-white/20">
                             <RefreshCw className={`w-5 h-5 text-white ${loading ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
@@ -558,7 +562,10 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
                 )}
 
                 {viewMode === 'list' && (
-                    <div className="h-full overflow-y-auto bg-gray-950 pb-32 pt-24 px-4">
+                    <div
+                        className="h-full overflow-y-auto bg-gray-950 pt-24 px-4"
+                        style={{ paddingBottom: isEmbedded ? 'calc(120px + env(safe-area-inset-bottom, 0px))' : '128px' }}
+                    >
                         <div className="mb-6">
                             <h2 className="text-3xl font-bold text-white mb-2">探索附近</h2>
                             <p className="text-gray-400 text-sm">找到最適合拍照的餐廳與參數</p>
@@ -611,7 +618,10 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
 
             {/* Bottom Sheet */}
             {selectedRestaurant && viewMode === 'map' && (
-                <div className="absolute bottom-24 left-4 right-4 z-40 animate-slideUp">
+                <div
+                    className="absolute left-4 right-4 z-40 animate-slideUp"
+                    style={{ bottom: isEmbedded ? 'calc(100px + env(safe-area-inset-bottom, 0px))' : '96px' }}
+                >
                     <div className="bg-gray-900/95 backdrop-blur-2xl rounded-3xl border border-white/20 shadow-2xl p-5">
                         <div className="flex items-start justify-between mb-4">
                             <div className="flex-1 min-w-0">
@@ -673,7 +683,10 @@ const MapView = ({ isOpen, onClose, onApplyParams, refreshTrigger, isEmbedded = 
 
             {/* Floating Action Buttons */}
             {viewMode === 'map' && isLoaded && (
-                <div className="absolute right-4 bottom-56 z-10">
+                <div
+                    className="absolute right-4 z-10"
+                    style={{ bottom: isEmbedded ? 'calc(176px + env(safe-area-inset-bottom, 0px))' : '224px' }}
+                >
                     <button
                         onClick={() => {
                             if (mapRef.current && userLocation) {

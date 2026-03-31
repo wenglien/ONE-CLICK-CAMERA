@@ -2467,7 +2467,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             </div>
 
 
-            <div className="flex-1 overflow-y-auto pb-32 px-2">
+            <div className="flex-1 overflow-y-auto pb-24 px-2">
               <div className="grid grid-cols-2 gap-2 p-2">
                 {Object.entries(capturedImages).map(([modeId, data]) => (
                   <div
@@ -2645,7 +2645,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             </div>
 
 
-            <div className="flex-1 flex items-center justify-center overflow-hidden pb-64">
+            <div className="flex-1 flex items-center justify-center overflow-hidden pb-40">
               <img
                 src={capturedImage}
                 alt="Captured"
@@ -2663,7 +2663,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
 
 
             <div
-              className="absolute left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent pt-8 pb-8 px-4"
+              className="absolute left-0 right-0 bg-gradient-to-t from-black via-black/98 to-transparent pt-12 pb-6 px-4"
               style={{ bottom: isEmbedded ? 'calc(80px + env(safe-area-inset-bottom, 0px))' : 'env(safe-area-inset-bottom, 0px)' }}
             >
 
@@ -2935,6 +2935,8 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
       )}
 
 
+      {/* camera-bottom-bar 只在相機預覽時顯示，拍照後（capturedImage 或多模式結果）隱藏以防遮擋操作面板 */}
+      {!capturedImage && Object.keys(capturedImages).length === 0 && (
       <div className={`camera-bottom-bar ${isEmbedded ? 'embedded' : ''} z-20 flex justify-center pb-8`}>
         <div className="flex items-center justify-around w-full max-w-md liquid-glass-dark p-4 border-white/10 mx-4">
           <button
@@ -2965,8 +2967,8 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
             )}
 
 
-            {/* 穩定狀態指示器 */}
-            {stabilizationEnabled && !capturedImage && (
+            {/* 穩定狀態指示器 — 僅在相機預覽時顯示，多模式結果頁不顯示 */}
+            {stabilizationEnabled && !capturedImage && Object.keys(capturedImages).length === 0 && (
               <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: isEmbedded ? 'calc(220px + env(safe-area-inset-bottom, 0px))' : 'calc(180px + env(safe-area-inset-bottom, 0px))' }}>
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-black/60 backdrop-blur-sm rounded-full">
                   <div className={`w-2 h-2 rounded-full transition-all ${isStable ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
@@ -3008,6 +3010,7 @@ const FoodCameraModal = ({ isOpen, onClose, appliedParams, onParamsApplied, onPh
           </button>
         </div>
       </div>
+      )} {/* end !capturedImage && Object.keys(capturedImages).length === 0 */}
 
 
 
